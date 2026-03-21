@@ -104,7 +104,7 @@ CLASS zcl_abapgit_folder_logic IMPLEMENTATION.
     ENDIF.
 
     IF iv_top = iv_package.
-      rv_path = io_dot->get_starting_folder( ).
+      rv_path = io_dot->get_folder_for_package( iv_package ).
     ELSE.
       lv_parentcl = get_parent(
         iv_top     = iv_top
@@ -191,7 +191,7 @@ CLASS zcl_abapgit_folder_logic IMPLEMENTATION.
           lv_folder_logic         TYPE string,
           lt_unique_package_names TYPE HASHED TABLE OF devclass WITH UNIQUE KEY table_line.
 
-    lv_length = strlen( io_dot->get_starting_folder( ) ).
+    lv_length = strlen( io_dot->get_folder_for_package( iv_top ) ).
     IF lv_length > strlen( iv_path ).
 * treat as not existing locally
       RETURN.

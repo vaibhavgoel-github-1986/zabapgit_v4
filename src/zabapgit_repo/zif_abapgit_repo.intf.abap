@@ -15,6 +15,19 @@ INTERFACE zif_abapgit_repo
   METHODS get_package
     RETURNING
       VALUE(rv_package) TYPE zif_abapgit_persistence=>ty_repo-package .
+  METHODS get_packages
+    RETURNING
+      VALUE(rt_packages) TYPE zif_abapgit_persistence=>ty_devclass_tt .
+  METHODS add_package
+    IMPORTING
+      !iv_package TYPE devclass
+    RAISING
+      zcx_abapgit_exception .
+  METHODS remove_package
+    IMPORTING
+      !iv_package TYPE devclass
+    RAISING
+      zcx_abapgit_exception .
   METHODS get_local_settings
     RETURNING
       VALUE(rs_settings) TYPE zif_abapgit_persistence=>ty_repo-local_settings .

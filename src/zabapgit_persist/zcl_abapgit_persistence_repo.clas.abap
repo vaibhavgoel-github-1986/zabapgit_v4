@@ -224,6 +224,7 @@ CLASS zcl_abapgit_persistence_repo IMPLEMENTATION.
     ls_repo-created_by   = sy-uname.
     GET TIME STAMP FIELD ls_repo-created_at.
     ls_repo-dot_abapgit  = is_dot_abapgit.
+    ls_repo-additional_packages = it_additional_packages.
 
     ls_repo-local_settings-display_name = iv_display_name.
 

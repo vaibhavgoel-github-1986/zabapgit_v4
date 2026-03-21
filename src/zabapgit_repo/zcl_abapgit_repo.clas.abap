@@ -40,6 +40,9 @@ CLASS zcl_abapgit_repo DEFINITION
     ALIASES get_data_config               FOR zif_abapgit_repo~get_data_config.
     ALIASES bind_listener                 FOR zif_abapgit_repo~bind_listener.
     ALIASES remove_ignored_files          FOR zif_abapgit_repo~remove_ignored_files.
+    ALIASES get_packages                   FOR zif_abapgit_repo~get_packages.
+    ALIASES add_package                    FOR zif_abapgit_repo~add_package.
+    ALIASES remove_package                 FOR zif_abapgit_repo~remove_package.
 
     METHODS constructor
       IMPORTING
@@ -74,6 +77,7 @@ CLASS zcl_abapgit_repo DEFINITION
         !iv_deserialized_at TYPE zif_abapgit_persistence=>ty_repo-deserialized_at OPTIONAL
         !iv_deserialized_by TYPE zif_abapgit_persistence=>ty_repo-deserialized_by OPTIONAL
         !iv_switched_origin TYPE zif_abapgit_persistence=>ty_repo-switched_origin OPTIONAL
+        !it_additional_packages TYPE zif_abapgit_persistence=>ty_devclass_tt OPTIONAL
       RAISING
         zcx_abapgit_exception .
     METHODS set_dot_apack
@@ -133,7 +137,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
+CLASS zcl_abapgit_repo IMPLEMENTATION.
 
 
   METHOD zif_abapgit_repo~bind_listener.
@@ -421,7 +425,7 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
         is_local_settings = get_local_settings( ).
 
     lt_new_local_files = lo_serialize->serialize(
-      iv_package = ms_data-package
+      iv_package = ls_tadir-devclass
       it_tadir   = lt_tadir ).
 
     INSERT LINES OF lt_new_local_files INTO TABLE mt_local.
@@ -516,7 +520,8 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
       OR is_local_settings IS SUPPLIED
       OR iv_deserialized_by IS SUPPLIED
       OR iv_deserialized_at IS SUPPLIED
-      OR iv_switched_origin IS SUPPLIED.
+      OR iv_switched_origin IS SUPPLIED
+      OR it_additional_packages IS SUPPLIED.
 
 
     IF iv_url IS SUPPLIED.
@@ -565,6 +570,11 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     IF iv_switched_origin IS SUPPLIED.
       ms_data-switched_origin = iv_switched_origin.
       ls_mask-switched_origin = abap_true.
+    ENDIF.
+
+    IF it_additional_packages IS SUPPLIED.
+      ms_data-additional_packages = it_additional_packages.
+      ls_mask-additional_packages = abap_true.
     ENDIF.
 
     notify_listener( ls_mask ).
@@ -739,6 +749,9 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
   METHOD zif_abapgit_repo~get_files_local.
 
     DATA lo_serialize TYPE REF TO zcl_abapgit_serialize.
+    DATA lt_packages TYPE zif_abapgit_persistence=>ty_devclass_tt.
+    DATA lv_package TYPE devclass.
+    DATA lt_package_files TYPE zif_abapgit_definitions=>ty_files_item_tt.
 
     " Serialization happened before and no refresh request
     IF lines( mt_local ) > 0 AND mv_request_local_refresh = abap_false.
@@ -751,10 +764,15 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
         io_dot_abapgit    = get_dot_abapgit( )
         is_local_settings = get_local_settings( ).
 
-    rt_files = lo_serialize->files_local(
-      iv_package     = get_package( )
-      ii_data_config = get_data_config( )
-      ii_log         = ii_log ).
+    lt_packages = get_packages( ).
+
+    LOOP AT lt_packages INTO lv_package.
+      lt_package_files = lo_serialize->files_local(
+        iv_package     = lv_package
+        ii_data_config = get_data_config( )
+        ii_log         = ii_log ).
+      INSERT LINES OF lt_package_files INTO TABLE rt_files.
+    ENDLOOP.
 
     remove_locally_excluded_files( CHANGING ct_loc_files = rt_files ).
 
@@ -768,6 +786,9 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
     DATA lo_serialize TYPE REF TO zcl_abapgit_serialize.
     DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    DATA lt_packages TYPE zif_abapgit_persistence=>ty_devclass_tt.
+    DATA lv_package TYPE devclass.
+    DATA lt_package_files TYPE zif_abapgit_definitions=>ty_files_item_tt.
 
 
     CREATE OBJECT lo_serialize
@@ -777,11 +798,16 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
     lt_filter = ii_obj_filter->get_filter( ).
 
-    rt_files = lo_serialize->files_local(
-      iv_package     = get_package( )
-      ii_data_config = get_data_config( )
-      ii_log         = ii_log
-      it_filter      = lt_filter ).
+    lt_packages = get_packages( ).
+
+    LOOP AT lt_packages INTO lv_package.
+      lt_package_files = lo_serialize->files_local(
+        iv_package     = lv_package
+        ii_data_config = get_data_config( )
+        ii_log         = ii_log
+        it_filter      = lt_filter ).
+      INSERT LINES OF lt_package_files INTO TABLE rt_files.
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -846,11 +872,20 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
   METHOD zif_abapgit_repo~get_tadir_objects.
 
-    rt_tadir = zcl_abapgit_factory=>get_tadir( )->read(
-      iv_package            = get_package( )
-      iv_ignore_subpackages = get_local_settings( )-ignore_subpackages
-      iv_only_local_objects = get_local_settings( )-only_local_objects
-      io_dot                = get_dot_abapgit( ) ).
+    DATA lt_packages TYPE zif_abapgit_persistence=>ty_devclass_tt.
+    DATA lv_package TYPE devclass.
+    DATA lt_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt.
+
+    lt_packages = get_packages( ).
+
+    LOOP AT lt_packages INTO lv_package.
+      lt_tadir = zcl_abapgit_factory=>get_tadir( )->read(
+        iv_package            = lv_package
+        iv_ignore_subpackages = get_local_settings( )-ignore_subpackages
+        iv_only_local_objects = get_local_settings( )-only_local_objects
+        io_dot                = get_dot_abapgit( ) ).
+      INSERT LINES OF lt_tadir INTO TABLE rt_tadir.
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -886,4 +921,103 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
   METHOD zif_abapgit_repo~set_dot_abapgit.
     set( is_dot_abapgit = io_dot_abapgit->get_data( ) ).
   ENDMETHOD.
+
+
+  METHOD zif_abapgit_repo~get_packages.
+
+    APPEND ms_data-package TO rt_packages.
+
+    IF ms_data-additional_packages IS NOT INITIAL.
+      APPEND LINES OF ms_data-additional_packages TO rt_packages.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_repo~add_package.
+
+    DATA lt_packages TYPE zif_abapgit_persistence=>ty_devclass_tt.
+    DATA lo_dot TYPE REF TO zcl_abapgit_dot_abapgit.
+    DATA lt_pf TYPE zif_abapgit_dot_abapgit=>ty_package_folder_tt.
+    DATA ls_pf TYPE zif_abapgit_dot_abapgit=>ty_package_folder.
+
+    " Check package is not already in this repo
+    lt_packages = get_packages( ).
+    READ TABLE lt_packages WITH KEY table_line = iv_package TRANSPORTING NO FIELDS.
+    IF sy-subrc = 0.
+      zcx_abapgit_exception=>raise( |Package { iv_package } is already part of this repository| ).
+    ENDIF.
+
+    " Add to additional_packages
+    lt_packages = ms_data-additional_packages.
+    APPEND iv_package TO lt_packages.
+
+    " Update package_folders in dot_abapgit config
+    lo_dot = get_dot_abapgit( ).
+    lt_pf = lo_dot->get_package_folders( ).
+
+    " If this is the first additional package, also add the primary package folder
+    IF lt_pf IS INITIAL.
+      ls_pf-package = ms_data-package.
+      ls_pf-folder  = '/' && to_lower( ms_data-package ) && '/'.
+      APPEND ls_pf TO lt_pf.
+    ENDIF.
+
+    ls_pf-package = iv_package.
+    ls_pf-folder  = '/' && to_lower( iv_package ) && '/'.
+    APPEND ls_pf TO lt_pf.
+
+    lo_dot->set_package_folders( lt_pf ).
+
+    " Persist both changes
+    set( it_additional_packages = lt_packages
+         is_dot_abapgit         = lo_dot->get_data( ) ).
+
+    " Force refresh of local files
+    mv_request_local_refresh = abap_true.
+    CLEAR mt_local.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_repo~remove_package.
+
+    DATA lt_packages TYPE zif_abapgit_persistence=>ty_devclass_tt.
+    DATA lo_dot TYPE REF TO zcl_abapgit_dot_abapgit.
+    DATA lt_pf TYPE zif_abapgit_dot_abapgit=>ty_package_folder_tt.
+
+    " Cannot remove the primary package
+    IF iv_package = ms_data-package.
+      zcx_abapgit_exception=>raise( |Cannot remove primary package { iv_package } from repository| ).
+    ENDIF.
+
+    " Check package exists in additional_packages
+    lt_packages = ms_data-additional_packages.
+    DELETE lt_packages WHERE table_line = iv_package.
+    IF lines( lt_packages ) = lines( ms_data-additional_packages ).
+      zcx_abapgit_exception=>raise( |Package { iv_package } is not part of this repository| ).
+    ENDIF.
+
+    " Update package_folders in dot_abapgit config
+    lo_dot = get_dot_abapgit( ).
+    lt_pf = lo_dot->get_package_folders( ).
+    DELETE lt_pf WHERE package = iv_package.
+
+    " If only primary package remains, clear package_folders (revert to single-package mode)
+    IF lines( lt_packages ) = 0.
+      CLEAR lt_pf.
+    ENDIF.
+
+    lo_dot->set_package_folders( lt_pf ).
+
+    " Persist both changes
+    set( it_additional_packages = lt_packages
+         is_dot_abapgit         = lo_dot->get_data( ) ).
+
+    " Force refresh
+    mv_request_local_refresh = abap_true.
+    CLEAR mt_local.
+
+  ENDMETHOD.
+
 ENDCLASS.

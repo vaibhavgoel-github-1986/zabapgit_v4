@@ -419,6 +419,17 @@ CLASS zcl_abapgit_repo_srv IMPLEMENTATION.
       lv_owner = <ls_repo>-created_by.
       ev_reason = |Package { iv_package } already versioned as { lv_name } by { lv_owner }|.
     ELSE.
+      " check if package is in additional_packages of any repo
+      LOOP AT lt_repos ASSIGNING <ls_repo>.
+        READ TABLE <ls_repo>-additional_packages WITH KEY table_line = iv_package TRANSPORTING NO FIELDS.
+        IF sy-subrc = 0.
+          ei_repo = get_instance( )->get( <ls_repo>-key ).
+          lv_name = ei_repo->get_name( ).
+          lv_owner = <ls_repo>-created_by.
+          ev_reason = |Package { iv_package } already versioned (additional) in { lv_name } by { lv_owner }|.
+          RETURN.
+        ENDIF.
+      ENDLOOP.
       " check if package is include as sub-package in a different repo
       validate_sub_super_packages(
         EXPORTING
@@ -576,10 +587,27 @@ CLASS zcl_abapgit_repo_srv IMPLEMENTATION.
     lo_dot_abapgit->set_name( iv_name ).
     lo_dot_abapgit->set_abap_language_version( iv_abap_lang_vers ).
 
+    " Auto-generate package folders for multi-package repos
+    IF it_additional_packages IS NOT INITIAL.
+      DATA lt_pf_offline TYPE zif_abapgit_dot_abapgit=>ty_package_folder_tt.
+      DATA ls_pf_offline TYPE zif_abapgit_dot_abapgit=>ty_package_folder.
+      ls_pf_offline-package = iv_package.
+      ls_pf_offline-folder  = '/' && to_lower( iv_package ) && '/'.
+      APPEND ls_pf_offline TO lt_pf_offline.
+      DATA lv_add_pkg_offline TYPE devclass.
+      LOOP AT it_additional_packages INTO lv_add_pkg_offline.
+        ls_pf_offline-package = lv_add_pkg_offline.
+        ls_pf_offline-folder  = '/' && to_lower( lv_add_pkg_offline ) && '/'.
+        APPEND ls_pf_offline TO lt_pf_offline.
+      ENDLOOP.
+      lo_dot_abapgit->set_package_folders( lt_pf_offline ).
+    ENDIF.
+
     lv_key = zcl_abapgit_persist_factory=>get_repo( )->add(
-      iv_package      = iv_package
-      iv_offline      = abap_true
-      is_dot_abapgit  = lo_dot_abapgit->get_data( ) ).
+      iv_package              = iv_package
+      iv_offline              = abap_true
+      is_dot_abapgit          = lo_dot_abapgit->get_data( )
+      it_additional_packages  = it_additional_packages ).
 
     TRY.
         ls_repo = zcl_abapgit_persist_factory=>get_repo( )->read( lv_key ).
@@ -635,13 +663,30 @@ CLASS zcl_abapgit_repo_srv IMPLEMENTATION.
     lo_dot_abapgit->set_name( iv_name ).
     lo_dot_abapgit->set_abap_language_version( iv_abap_lang_vers ).
 
+    " Auto-generate package folders for multi-package repos
+    IF it_additional_packages IS NOT INITIAL.
+      DATA lt_pf_online TYPE zif_abapgit_dot_abapgit=>ty_package_folder_tt.
+      DATA ls_pf_online TYPE zif_abapgit_dot_abapgit=>ty_package_folder.
+      ls_pf_online-package = iv_package.
+      ls_pf_online-folder  = '/' && to_lower( iv_package ) && '/'.
+      APPEND ls_pf_online TO lt_pf_online.
+      DATA lv_add_pkg_online TYPE devclass.
+      LOOP AT it_additional_packages INTO lv_add_pkg_online.
+        ls_pf_online-package = lv_add_pkg_online.
+        ls_pf_online-folder  = '/' && to_lower( lv_add_pkg_online ) && '/'.
+        APPEND ls_pf_online TO lt_pf_online.
+      ENDLOOP.
+      lo_dot_abapgit->set_package_folders( lt_pf_online ).
+    ENDIF.
+
     lv_key = zcl_abapgit_persist_factory=>get_repo( )->add(
-      iv_url          = lv_url
-      iv_branch_name  = lv_branch_name " local !
-      iv_display_name = iv_display_name
-      iv_package      = iv_package
-      iv_offline      = abap_false
-      is_dot_abapgit  = lo_dot_abapgit->get_data( ) ).
+      iv_url                  = lv_url
+      iv_branch_name          = lv_branch_name
+      iv_display_name         = iv_display_name
+      iv_package              = iv_package
+      iv_offline              = abap_false
+      is_dot_abapgit          = lo_dot_abapgit->get_data( )
+      it_additional_packages  = it_additional_packages ).
 
     TRY.
         ls_repo = zcl_abapgit_persist_factory=>get_repo( )->read( lv_key ).
@@ -765,4 +810,19 @@ CLASS zcl_abapgit_repo_srv IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.
+
+
+  METHOD zif_abapgit_repo_srv~add_package_to_repo.
+
+    ii_repo->add_package( iv_package ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_repo_srv~remove_package_from_repo.
+
+    ii_repo->remove_package( iv_package ).
+
+  ENDMETHOD.
+
 ENDCLASS.

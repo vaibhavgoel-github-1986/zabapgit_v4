@@ -122,6 +122,17 @@ CLASS zcl_abapgit_dot_abapgit DEFINITION
     METHODS set_objs_without_translation
       IMPORTING
         !it_list TYPE zif_abapgit_dot_abapgit=>ty_dot_abapgit-without_translation.
+    METHODS get_package_folders
+      RETURNING
+        VALUE(rt_package_folders) TYPE zif_abapgit_dot_abapgit=>ty_package_folder_tt .
+    METHODS set_package_folders
+      IMPORTING
+        !it_package_folders TYPE zif_abapgit_dot_abapgit=>ty_package_folder_tt .
+    METHODS get_folder_for_package
+      IMPORTING
+        !iv_package    TYPE devclass
+      RETURNING
+        VALUE(rv_path) TYPE string .
 
   PROTECTED SECTION.
   PRIVATE SECTION.
@@ -144,7 +155,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_DOT_ABAPGIT IMPLEMENTATION.
+CLASS zcl_abapgit_dot_abapgit IMPLEMENTATION.
 
 
   METHOD add_ignore.
@@ -308,8 +319,10 @@ CLASS ZCL_ABAPGIT_DOT_ABAPGIT IMPLEMENTATION.
     DATA: lv_name     TYPE string,
           lv_starting TYPE string,
           lv_dot      TYPE string,
-          lv_ignore   TYPE string.
+          lv_ignore   TYPE string,
+          lv_folder   TYPE string.
 
+    FIELD-SYMBOLS <ls_pf> TYPE zif_abapgit_dot_abapgit=>ty_package_folder.
 
     lv_name = iv_path && iv_filename.
 
@@ -333,9 +346,21 @@ CLASS ZCL_ABAPGIT_DOT_ABAPGIT IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    " Ignore all files outside of starting folder tree
-    IF ms_data-starting_folder <> '/' AND NOT lv_name CP lv_starting.
+    " Multi-package mode: file is valid if it falls under any package folder
+    IF ms_data-package_folders IS NOT INITIAL.
+      LOOP AT ms_data-package_folders ASSIGNING <ls_pf>.
+        CONCATENATE <ls_pf>-folder '*' INTO lv_folder.
+        IF lv_name CP lv_folder.
+          RETURN. " Not ignored — belongs to a known package folder
+        ENDIF.
+      ENDLOOP.
+      " File doesn't belong to any package folder
       rv_ignored = abap_true.
+    ELSE.
+      " Single-package: Ignore all files outside of starting folder tree
+      IF ms_data-starting_folder <> '/' AND NOT lv_name CP lv_starting.
+        rv_ignored = abap_true.
+      ENDIF.
     ENDIF.
 
     IF iv_path = zif_abapgit_data_config=>c_default_path.
@@ -448,4 +473,32 @@ CLASS ZCL_ABAPGIT_DOT_ABAPGIT IMPLEMENTATION.
     rv_yes = ms_data-use_lxe.
 
   ENDMETHOD.
+
+
+  METHOD get_package_folders.
+    rt_package_folders = ms_data-package_folders.
+  ENDMETHOD.
+
+
+  METHOD set_package_folders.
+    ms_data-package_folders = it_package_folders.
+  ENDMETHOD.
+
+
+  METHOD get_folder_for_package.
+
+    FIELD-SYMBOLS <ls_pf> TYPE zif_abapgit_dot_abapgit=>ty_package_folder.
+
+    LOOP AT ms_data-package_folders ASSIGNING <ls_pf>.
+      IF <ls_pf>-package = iv_package.
+        rv_path = <ls_pf>-folder.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+    " Fallback to starting_folder for single-package repos
+    rv_path = get_starting_folder( ).
+
+  ENDMETHOD.
+
 ENDCLASS.

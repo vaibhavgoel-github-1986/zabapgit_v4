@@ -48,31 +48,33 @@ INTERFACE zif_abapgit_repo_srv
       zcx_abapgit_exception .
   METHODS new_offline
     IMPORTING
-      !iv_name           TYPE string
-      !iv_package        TYPE devclass
-      !iv_folder_logic   TYPE string DEFAULT zif_abapgit_dot_abapgit=>c_folder_logic-full
-      !iv_labels         TYPE string OPTIONAL
-      !iv_ign_subpkg     TYPE abap_bool DEFAULT abap_false
-      !iv_main_lang_only TYPE abap_bool DEFAULT abap_false
-      !iv_abap_lang_vers TYPE string OPTIONAL
+      !iv_name                 TYPE string
+      !iv_package              TYPE devclass
+      !iv_folder_logic         TYPE string DEFAULT zif_abapgit_dot_abapgit=>c_folder_logic-full
+      !iv_labels               TYPE string OPTIONAL
+      !iv_ign_subpkg           TYPE abap_bool DEFAULT abap_false
+      !iv_main_lang_only       TYPE abap_bool DEFAULT abap_false
+      !iv_abap_lang_vers       TYPE string OPTIONAL
+      !it_additional_packages  TYPE zif_abapgit_persistence=>ty_devclass_tt OPTIONAL
     RETURNING
-      VALUE(ri_repo)     TYPE REF TO zif_abapgit_repo
+      VALUE(ri_repo)           TYPE REF TO zif_abapgit_repo
     RAISING
       zcx_abapgit_exception .
   METHODS new_online
     IMPORTING
-      !iv_url            TYPE string
-      !iv_branch_name    TYPE string OPTIONAL
-      !iv_display_name   TYPE string OPTIONAL
-      !iv_name           TYPE string OPTIONAL
-      !iv_package        TYPE devclass
-      !iv_folder_logic   TYPE string DEFAULT zif_abapgit_dot_abapgit=>c_folder_logic-prefix
-      !iv_labels         TYPE string OPTIONAL
-      !iv_ign_subpkg     TYPE abap_bool DEFAULT abap_false
-      !iv_main_lang_only TYPE abap_bool DEFAULT abap_false
-      !iv_abap_lang_vers TYPE string OPTIONAL
+      !iv_url                  TYPE string
+      !iv_branch_name          TYPE string OPTIONAL
+      !iv_display_name         TYPE string OPTIONAL
+      !iv_name                 TYPE string OPTIONAL
+      !iv_package              TYPE devclass
+      !iv_folder_logic         TYPE string DEFAULT zif_abapgit_dot_abapgit=>c_folder_logic-prefix
+      !iv_labels               TYPE string OPTIONAL
+      !iv_ign_subpkg           TYPE abap_bool DEFAULT abap_false
+      !iv_main_lang_only       TYPE abap_bool DEFAULT abap_false
+      !iv_abap_lang_vers       TYPE string OPTIONAL
+      !it_additional_packages  TYPE zif_abapgit_persistence=>ty_devclass_tt OPTIONAL
     RETURNING
-      VALUE(ri_repo)     TYPE REF TO zif_abapgit_repo
+      VALUE(ri_repo)           TYPE REF TO zif_abapgit_repo
     RAISING
       zcx_abapgit_exception .
   METHODS purge
@@ -119,5 +121,17 @@ INTERFACE zif_abapgit_repo_srv
       VALUE(rt_labels) TYPE ty_labels
     RAISING
       zcx_abapgit_exception.
+  METHODS add_package_to_repo
+    IMPORTING
+      !ii_repo    TYPE REF TO zif_abapgit_repo
+      !iv_package TYPE devclass
+    RAISING
+      zcx_abapgit_exception .
+  METHODS remove_package_from_repo
+    IMPORTING
+      !ii_repo    TYPE REF TO zif_abapgit_repo
+      !iv_package TYPE devclass
+    RAISING
+      zcx_abapgit_exception .
 
 ENDINTERFACE.

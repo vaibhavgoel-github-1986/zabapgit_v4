@@ -10,6 +10,14 @@ INTERFACE zif_abapgit_dot_abapgit PUBLIC.
     ty_requirement_tt TYPE STANDARD TABLE OF ty_requirement WITH DEFAULT KEY .
 
   TYPES:
+    BEGIN OF ty_package_folder,
+      package TYPE devclass,
+      folder  TYPE string,
+    END OF ty_package_folder .
+  TYPES:
+    ty_package_folder_tt TYPE STANDARD TABLE OF ty_package_folder WITH DEFAULT KEY .
+
+  TYPES:
     BEGIN OF ty_dot_abapgit,
       name                  TYPE string,
       master_language       TYPE spras,
@@ -23,6 +31,7 @@ INTERFACE zif_abapgit_dot_abapgit PUBLIC.
       version_constant      TYPE string,
       abap_language_version TYPE string,
       original_system       TYPE tadir-srcsystem,
+      package_folders       TYPE ty_package_folder_tt,
     END OF ty_dot_abapgit .
 
   CONSTANTS:
