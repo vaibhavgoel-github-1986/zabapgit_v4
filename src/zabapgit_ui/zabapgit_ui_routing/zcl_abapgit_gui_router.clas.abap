@@ -487,56 +487,67 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
   METHOD go_stage_transport.
 
     DATA lt_r_trkorr TYPE zif_abapgit_definitions=>ty_trrngtrkor_tt.
-    DATA ls_r_trkorr TYPE LINE OF zif_abapgit_definitions=>ty_trrngtrkor_tt.
     DATA li_repo TYPE REF TO zif_abapgit_repo.
-    DATA lv_transport_type TYPE e070-trfunction.
+    DATA ls_request TYPE e070.
     DATA lv_trkorr TYPE trkorr.
     DATA lv_unreleased_tasks TYPE i.
 
-    " Use simple transport input popup
+    " Use simple transport input popup. Sub-tasks (S/X) are allowed so that each
+    " developer working in a shared parent request can raise their own pull request.
     CALL FUNCTION 'TR_POPUP_INPUT_REQUEST'
       EXPORTING
-        iv_title               = 'Parent Request'
+        iv_title               = 'Request / Task'
         iv_description         = 'Request'
-        iv_trfunctions         = 'KTR'
-        iv_trstatus            = 'D'
+        iv_trfunctions         = 'KTRSX'
       IMPORTING
         ev_trkorr              = lv_trkorr                 " Request number
       EXCEPTIONS
         action_aborted_by_user = 1
         OTHERS                 = 2.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Gegting Transport Request Failed' ).
+      zcx_abapgit_exception=>raise( 'Getting Transport Request failed' ).
     ENDIF.
 
     IF lv_trkorr IS INITIAL.
       zcx_abapgit_exception=>raise( 'No transport was provided for staging' ).
     ENDIF.
 
-    " Check if selected transport is a main transport (not a subtask)
-    SELECT SINGLE trfunction
+    SELECT SINGLE trfunction, trstatus, strkorr
       FROM e070
       WHERE trkorr = @lv_trkorr
-      INTO @lv_transport_type.
+      INTO CORRESPONDING FIELDS OF @ls_request.
     IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( |Transport { lv_trkorr } not found in system| ).
     ENDIF.
 
-    IF lv_transport_type <> 'K' AND lv_transport_type <> 'Q'.
-      zcx_abapgit_exception=>raise( |Transport { lv_trkorr } is not a main transport. | &
-                                    |Please select a main transport (type K or Q), not a subtask| ).
-    ENDIF.
+    CASE ls_request-trfunction.
+      WHEN 'K' OR 'Q'.
+        " Parent request: objects are only merged into the parent once every task is
+        " released, so staging a parent still requires all sub-tasks to be released.
+        SELECT COUNT( * )
+          FROM e070
+          WHERE strkorr  = @lv_trkorr
+            AND trstatus IN ( 'D', 'L' )
+          INTO @lv_unreleased_tasks.
+        IF lv_unreleased_tasks > 0.
+          zcx_abapgit_exception=>raise( |Transport { lv_trkorr } has { lv_unreleased_tasks } | &&
+                                        |unreleased subtask(s). All subtasks must be released before staging| ).
+        ENDIF.
 
-    " Check that all subtasks under the main transport are released
-    SELECT COUNT( * )
-      FROM e070
-      WHERE strkorr = @lv_trkorr
-        AND trstatus = 'D' or trstatus = 'L'
-      INTO @lv_unreleased_tasks.
-    IF lv_unreleased_tasks > 0.
-      zcx_abapgit_exception=>raise( |Transport { lv_trkorr } has { lv_unreleased_tasks } | &
-                                    |unreleased subtask(s). All subtasks must be released before staging| ).
-    ENDIF.
+      WHEN 'S' OR 'X'.
+        " Sub-task: the task keeps its own E071 entries after release, so only the
+        " objects owned by this developer are staged.
+        IF ls_request-strkorr IS INITIAL.
+          zcx_abapgit_exception=>raise( |Task { lv_trkorr } has no parent request| ).
+        ENDIF.
+        IF ls_request-trstatus <> 'R' AND ls_request-trstatus <> 'N'.
+          zcx_abapgit_exception=>raise( |Task { lv_trkorr } is not released. | &&
+                                        |Release the task first, then stage it| ).
+        ENDIF.
+
+      WHEN OTHERS.
+        zcx_abapgit_exception=>raise( |{ lv_trkorr } is neither a workbench request nor a task| ).
+    ENDCASE.
 
     " Convert single transport to range table format for filter
     lt_r_trkorr = VALUE #( ( sign = 'I' option = 'EQ' low = lv_trkorr ) ).

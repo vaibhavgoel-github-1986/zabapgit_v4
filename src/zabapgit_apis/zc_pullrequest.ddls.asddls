@@ -6,9 +6,11 @@ define root view entity ZC_PullRequest
   as projection on ZI_PullRequest
 {
   key ParentRequest,
+  key TaskRequest,
       PrId,
       RequestStatus,
       PrStatus,
+      Owner,
       ExceptionReason,
       CreatedBy,
       CreatedOn,

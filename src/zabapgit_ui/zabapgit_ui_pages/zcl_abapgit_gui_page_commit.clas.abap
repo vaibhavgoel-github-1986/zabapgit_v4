@@ -113,6 +113,19 @@ CLASS zcl_abapgit_gui_page_commit DEFINITION
     METHODS get_transport_from_stage
       RETURNING VALUE(rv_transport) TYPE string.
 
+    METHODS get_parent_request
+      IMPORTING iv_request       TYPE trkorr
+      RETURNING VALUE(rv_parent) TYPE trkorr.
+
+    METHODS get_request_owner
+      IMPORTING iv_request      TYPE trkorr
+      RETURNING VALUE(rv_owner) TYPE tr_as4user.
+
+    METHODS build_pr_body
+      IMPORTING iv_request     TYPE trkorr
+                iv_body        TYPE string
+      RETURNING VALUE(rv_body) TYPE string.
+
     METHODS get_transport_description
       IMPORTING iv_transport          TYPE string
       RETURNING VALUE(rv_description) TYPE string.
@@ -177,9 +190,27 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
     DATA lt_reviewers     TYPE string_table.
     DATA lt_users         TYPE STANDARD TABLE OF tvarvc WITH DEFAULT KEY.
     DATA ls_user          TYPE tvarvc.
+    DATA lv_staged_request TYPE trkorr.
+    DATA lv_parent_request TYPE trkorr.
+    DATA lv_task_request   TYPE trkorr.
+    DATA lv_owner          TYPE tr_as4user.
 
     " Get repository URL
     lv_repo_url = mi_repo_online->get_url( ).
+
+    " The staged request is a sub-task when several developers share one parent request
+    lv_staged_request = get_transport_from_stage( ).
+    IF lv_staged_request = 'DIRECT_COMMIT' OR lv_staged_request = 'NO_TRANSPORT'.
+      CLEAR lv_staged_request.
+    ENDIF.
+
+    IF lv_staged_request IS NOT INITIAL.
+      lv_parent_request = get_parent_request( lv_staged_request ).
+      lv_owner          = get_request_owner( lv_staged_request ).
+      IF lv_parent_request <> lv_staged_request.
+        lv_task_request = lv_staged_request.
+      ENDIF.
+    ENDIF.
 
     " Extract user/repo from URL (for GitHub: https://github.com/user/repo.git)
     FIND REGEX 'github\.com[/:]([^/]+)/([^/]+)' IN lv_repo_url
@@ -226,9 +257,13 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
       MESSAGE |No reviewers configured, defaulting to sekanaga_cisco| TYPE 'W'.
     ENDIF.
 
-    " Remove current user from reviewer list (prevent self-review)
+    " Remove the task owner from reviewer list (prevent self-review)
     DATA lv_current_user_cisco TYPE string.
-    lv_current_user_cisco = to_lower( |{ sy-uname }_cisco| ).
+    IF lv_owner IS NOT INITIAL.
+      lv_current_user_cisco = to_lower( |{ lv_owner }_cisco| ).
+    ELSE.
+      lv_current_user_cisco = to_lower( |{ sy-uname }_cisco| ).
+    ENDIF.
 
     DELETE lt_reviewers WHERE table_line = lv_current_user_cisco.
 
@@ -278,7 +313,12 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
 
         " Sanitize PR title and body for JSON compatibility
         DATA(lv_sanitized_title) = escape_json_string( iv_pr_title ).
-        DATA(lv_sanitized_body) = escape_json_string( iv_pr_body ).
+        DATA(lv_enriched_body) = COND string(
+          WHEN lv_staged_request IS NOT INITIAL
+          THEN build_pr_body( iv_request = lv_staged_request
+                              iv_body    = iv_pr_body )
+          ELSE iv_pr_body ).
+        DATA(lv_sanitized_body) = escape_json_string( lv_enriched_body ).
 
         " Log the JSON escaping process for debugging
         zcl_abapgit_logging_utils=>write_application_log(
@@ -302,18 +342,21 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
 
         " Step 1.5: Automatically link PR to transport request in database
         TRY.
-            DATA(lv_transport) = get_transport_from_stage( ).
-            IF lv_transport IS NOT INITIAL.
+            IF lv_staged_request IS NOT INITIAL.
               zcl_abapgit_pr_status_manager=>create_pr_link(
-                  iv_parent_request = CONV strkorr( lv_transport )
+                  iv_parent_request = CONV strkorr( lv_parent_request )
+                  iv_task_request   = lv_task_request
                   iv_pr_id          = CONV int8( lv_pr_number )
-                  iv_pr_status      = zcl_abapgit_pr_status_manager=>c_pr_status-open ).
+                  iv_owner          = lv_owner
+                  iv_pr_status      = zcl_abapgit_pr_status_manager=>c_pr_status-open
+                  iv_log_handle     = mv_log_handle ).
 
               zcl_abapgit_logging_utils=>write_application_log(
                   iv_log_handle = mv_log_handle
                   iv_log_type   = 'I'
                   iv_message    = 'PR linked to transport request'
-                  iv_detail     = |Transport: { lv_transport }, PR: { lv_pr_number }| ).
+                  iv_detail     = |Parent: { lv_parent_request }, Task: { lv_task_request }, | &&
+                                  |Owner: { lv_owner }, PR: { lv_pr_number }| ).
             ELSE.
               zcl_abapgit_logging_utils=>write_application_log(
                   iv_log_handle = mv_log_handle
@@ -972,6 +1015,51 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
     IF strlen( rv_transport ) > 20.
       rv_transport = rv_transport(20).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD get_parent_request.
+    " A task carries its parent in STRKORR, a request is its own parent
+    SELECT SINGLE strkorr FROM e070
+      INTO @rv_parent
+      WHERE trkorr = @iv_request.
+
+    IF sy-subrc <> 0 OR rv_parent IS INITIAL.
+      rv_parent = iv_request.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD get_request_owner.
+    SELECT SINGLE as4user FROM e070
+      INTO @rv_owner
+      WHERE trkorr = @iv_request.
+
+    IF sy-subrc <> 0.
+      CLEAR rv_owner.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD build_pr_body.
+    DATA lv_parent TYPE trkorr.
+    DATA lv_owner  TYPE tr_as4user.
+    DATA lv_nl     TYPE string.
+
+    lv_nl     = cl_abap_char_utilities=>newline.
+    lv_parent = get_parent_request( iv_request ).
+    lv_owner  = get_request_owner( iv_request ).
+
+    " Reviewers need to see which task of which parent request they are reviewing,
+    " because several developers raise separate PRs under one parent request
+    IF lv_parent = iv_request.
+      rv_body = |**Transport Request:** { iv_request }{ lv_nl }|.
+    ELSE.
+      rv_body = |**Parent Request:** { lv_parent }{ lv_nl }| &&
+                |**Task:** { iv_request }{ lv_nl }|.
+    ENDIF.
+
+    rv_body = rv_body &&
+              |**Owner:** { lv_owner }{ lv_nl }| &&
+              |**Objects:** { lines( mt_stage ) }{ lv_nl }{ lv_nl }| &&
+              iv_body.
   ENDMETHOD.
 
   METHOD get_transport_description.

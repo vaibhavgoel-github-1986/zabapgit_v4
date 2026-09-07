@@ -19,7 +19,8 @@ authorization master ( instance )
   ChangedAt;
 
   field ( readonly : update )
-  ParentRequest;
+  ParentRequest,
+  TaskRequest;
 
   create;
   update;
@@ -30,9 +31,11 @@ authorization master ( instance )
   mapping for zdt_pull_request
     {
       ParentRequest   = parent_request;
+      TaskRequest     = task_request;
       PrId            = pr_id;
       RequestStatus   = request_status;
       PrStatus        = pr_status;
+      Owner           = owner;
       ExceptionReason = exception_reason;
       CreatedBy       = created_by;
       CreatedOn       = created_on;

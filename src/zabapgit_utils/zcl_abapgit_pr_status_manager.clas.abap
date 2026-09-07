@@ -20,23 +20,29 @@ CLASS zcl_abapgit_pr_status_manager DEFINITION
     CLASS-METHODS create_pr_link
       IMPORTING
         iv_parent_request   TYPE strkorr
+        iv_task_request     TYPE trkorr OPTIONAL
         iv_pr_id            TYPE int8
         iv_pr_status        TYPE zde_pr_status DEFAULT c_pr_status-open
+        iv_owner            TYPE tr_as4user OPTIONAL
         iv_exception_reason TYPE string OPTIONAL
+        iv_log_handle       TYPE balloghndl OPTIONAL
       RAISING
         zcx_abapgit_exception.
 
     CLASS-METHODS update_pr_status
       IMPORTING
         iv_parent_request TYPE strkorr
+        iv_task_request   TYPE trkorr OPTIONAL
         iv_pr_id          TYPE int8
         iv_pr_status      TYPE zde_pr_status
+        iv_log_handle     TYPE balloghndl OPTIONAL
       RAISING
         zcx_abapgit_exception.
 
     CLASS-METHODS get_pr_tr_linkage
       IMPORTING
         iv_parent_request TYPE strkorr
+        iv_task_request   TYPE trkorr OPTIONAL
         iv_pr_id          TYPE int8 OPTIONAL
       RETURNING
         VALUE(rt_links)   TYPE tt_pr_links
@@ -46,6 +52,7 @@ CLASS zcl_abapgit_pr_status_manager DEFINITION
     CLASS-METHODS delete_pr_link
       IMPORTING
         iv_parent_request TYPE strkorr
+        iv_task_request   TYPE trkorr OPTIONAL
         iv_pr_id          TYPE int8
       RAISING
         zcx_abapgit_exception.
@@ -54,6 +61,8 @@ CLASS zcl_abapgit_pr_status_manager DEFINITION
       IMPORTING
         iv_parent_request TYPE strkorr
         iv_repo_url       TYPE string
+        iv_task_request   TYPE trkorr OPTIONAL
+        iv_log_handle     TYPE balloghndl OPTIONAL
       RAISING
         zcx_abapgit_exception.
 
@@ -70,9 +79,16 @@ CLASS zcl_abapgit_pr_status_manager DEFINITION
 
     CLASS-METHODS get_transport_status
       IMPORTING
-        iv_parent_request   TYPE strkorr
+        iv_request          TYPE trkorr
       RETURNING
         VALUE(rv_tr_status) TYPE trstatus.
+
+    CLASS-METHODS write_log
+      IMPORTING
+        iv_log_handle TYPE balloghndl
+        iv_type       TYPE c DEFAULT 'I'
+        iv_message    TYPE string
+        iv_detail     TYPE string OPTIONAL.
 
 ENDCLASS.
 
@@ -83,22 +99,37 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
 
   METHOD create_pr_link.
 
-    DATA: ls_pr_link TYPE zdt_pull_request.
+    DATA: ls_pr_link TYPE zdt_pull_request,
+          lv_request TYPE trkorr.
+
+    " Status is tracked against the task when the PR belongs to a task,
+    " otherwise against the parent request itself
+    lv_request = COND #( WHEN iv_task_request IS NOT INITIAL
+                         THEN iv_task_request
+                         ELSE iv_parent_request ).
 
     " Check if link already exists
     SELECT SINGLE parent_request FROM zdt_pull_request
       INTO @DATA(lv_existing)
       WHERE parent_request = @iv_parent_request
-        AND pr_id = @iv_pr_id.
+        AND task_request   = @iv_task_request.
     IF sy-subrc = 0.
-      zcx_abapgit_exception=>raise( |PR link already exists for request { iv_parent_request } and PR { iv_pr_id }| ).
+      write_log( iv_log_handle = iv_log_handle
+                 iv_type       = 'E'
+                 iv_message    = 'PR link already exists'
+                 iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }| ).
+
+      zcx_abapgit_exception=>raise(
+        |PR link already exists for request { iv_parent_request } task { iv_task_request }| ).
     ENDIF.
 
     " Create new PR link
     ls_pr_link-parent_request = iv_parent_request.
+    ls_pr_link-task_request = iv_task_request.
     ls_pr_link-pr_id = iv_pr_id.
-    ls_pr_link-request_status = get_transport_status( iv_parent_request ).
+    ls_pr_link-request_status = get_transport_status( lv_request ).
     ls_pr_link-pr_status = iv_pr_status.
+    ls_pr_link-owner = iv_owner.
 
     IF iv_exception_reason IS SUPPLIED.
       ls_pr_link-exception_reason = iv_exception_reason.
@@ -113,67 +144,98 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
 
     INSERT zdt_pull_request FROM ls_pr_link.
     IF sy-subrc <> 0.
-      "Try Updating, if insert fails
-      UPDATE zdt_pull_request
-         SET request_status = ls_pr_link-request_status
-             pr_id          = ls_pr_link-pr_id
-             pr_status      = ls_pr_link-pr_status
-             changed_by     = ls_pr_link-changed_by
-             changed_on     = ls_pr_link-changed_on
-             changed_at     = ls_pr_link-changed_at
-       WHERE parent_request = iv_parent_request.
-      IF sy-subrc IS NOT INITIAL.
-        zcx_abapgit_exception=>raise( |Failed to insert entry in DB| ).
-      ENDIF.
+      write_log( iv_log_handle = iv_log_handle
+                 iv_type       = 'E'
+                 iv_message    = 'Failed to insert PR link'
+                 iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }, PR: { iv_pr_id }| ).
+
+      zcx_abapgit_exception=>raise( |Failed to insert entry in DB| ).
     ENDIF.
 
     COMMIT WORK.
+
+    write_log( iv_log_handle = iv_log_handle
+               iv_type       = 'S'
+               iv_message    = 'PR link created'
+               iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }, | &&
+                               |PR: { iv_pr_id }, Owner: { iv_owner }| ).
 
   ENDMETHOD.
 
 
   METHOD update_pr_status.
 
-    DATA: ls_pr_link TYPE zdt_pull_request.
+    DATA: ls_pr_link TYPE zdt_pull_request,
+          lv_request TYPE trkorr.
+
+    lv_request = COND #( WHEN iv_task_request IS NOT INITIAL
+                         THEN iv_task_request
+                         ELSE iv_parent_request ).
 
     " Read existing record
     SELECT SINGLE * FROM zdt_pull_request
       INTO ls_pr_link
       WHERE parent_request = iv_parent_request
+        AND task_request   = iv_task_request
         AND pr_id = iv_pr_id.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |PR link not found for request { iv_parent_request } and PR { iv_pr_id }| ).
+      write_log( iv_log_handle = iv_log_handle
+                 iv_type       = 'E'
+                 iv_message    = 'PR link not found'
+                 iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }, PR: { iv_pr_id }| ).
+
+      zcx_abapgit_exception=>raise(
+        |PR link not found for request { iv_parent_request } task { iv_task_request } and PR { iv_pr_id }| ).
     ENDIF.
 
     " Update status and change info
     ls_pr_link-pr_status = iv_pr_status.
-    ls_pr_link-request_status = get_transport_status( iv_parent_request ).
+    ls_pr_link-request_status = get_transport_status( lv_request ).
     ls_pr_link-changed_by = sy-uname.
     ls_pr_link-changed_on = sy-datum.
     ls_pr_link-changed_at = sy-uzeit.
 
     UPDATE zdt_pull_request FROM ls_pr_link.
     IF sy-subrc <> 0.
+      write_log( iv_log_handle = iv_log_handle
+                 iv_type       = 'E'
+                 iv_message    = 'Failed to update PR status'
+                 iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }, PR: { iv_pr_id }| ).
+
       zcx_abapgit_exception=>raise( |Failed to update PR status: { sy-subrc }| ).
     ENDIF.
 
     COMMIT WORK.
+
+    write_log( iv_log_handle = iv_log_handle
+               iv_type       = 'S'
+               iv_message    = 'PR status updated'
+               iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }, | &&
+                               |PR: { iv_pr_id }, Status: { iv_pr_status }| ).
 
   ENDMETHOD.
 
 
   METHOD get_pr_tr_linkage.
 
-    DATA: lr_pr_id TYPE RANGE OF int8.
+    DATA: lr_pr_id TYPE RANGE OF int8,
+          lr_task  TYPE RANGE OF trkorr.
 
     IF NOT iv_pr_id IS INITIAL.
       lr_pr_id = VALUE #( ( sign = 'I' option = 'EQ' low = iv_pr_id ) ).
     ENDIF.
 
+    " When no task is supplied every PR under the parent request is returned,
+    " which is what the parent-level rollup needs
+    IF NOT iv_task_request IS INITIAL.
+      lr_task = VALUE #( ( sign = 'I' option = 'EQ' low = iv_task_request ) ).
+    ENDIF.
+
     SELECT *
       FROM zdt_pull_request
       WHERE parent_request = @iv_parent_request
+        AND task_request IN @lr_task
         AND pr_id IN @lr_pr_id
           INTO TABLE @rt_links.
 
@@ -184,6 +246,7 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
 
     DELETE FROM zdt_pull_request
       WHERE parent_request = iv_parent_request
+        AND task_request   = iv_task_request
         AND pr_id = iv_pr_id.
 
     IF sy-subrc <> 0.
@@ -197,34 +260,46 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
 
   METHOD sync_with_github.
 
-    DATA: lt_links             TYPE tt_pr_links,
-          lv_new_status        TYPE zde_pr_status,
-          lv_updated_count     TYPE i,
-          lv_current_tr_status TYPE trstatus,
-          lv_status_updated    TYPE abap_bool.
+    DATA: lt_links          TYPE tt_pr_links,
+          lv_new_status     TYPE zde_pr_status,
+          lv_updated_count  TYPE i,
+          lv_request        TYPE trkorr,
+          lv_tr_status      TYPE trstatus,
+          lv_status_updated TYPE abap_bool.
 
     FIELD-SYMBOLS: <ls_link> TYPE zdt_pull_request.
 
-    " Get all PR links for this transport request
-    lt_links = get_pr_tr_linkage( iv_parent_request ).
+    " Get PR links for this parent request, optionally narrowed to a single task
+    lt_links = get_pr_tr_linkage( iv_parent_request = iv_parent_request
+                                  iv_task_request   = iv_task_request ).
     IF lines( lt_links ) = 0.
-      MESSAGE |No Pull Request was found for the Request.|
-       TYPE 'E'.
+      " Nothing linked yet is a normal situation and must never block the caller
+      write_log( iv_log_handle = iv_log_handle
+                 iv_type       = 'W'
+                 iv_message    = 'No pull request linked to this request'
+                 iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }| ).
       RETURN.
     ENDIF.
 
-    " Get current transport status from SAP system
-    lv_current_tr_status = get_transport_status( iv_parent_request ).
+    write_log( iv_log_handle = iv_log_handle
+               iv_type       = 'I'
+               iv_message    = 'Starting GitHub status sync'
+               iv_detail     = |Parent: { iv_parent_request }, Links: { lines( lt_links ) }| ).
 
     " Update status for each linked PR
     LOOP AT lt_links ASSIGNING <ls_link>.
+      CLEAR lv_status_updated.
+
       TRY.
+          " Transport status is tracked per task where the PR belongs to a task
+          lv_request = COND #( WHEN <ls_link>-task_request IS NOT INITIAL
+                               THEN <ls_link>-task_request
+                               ELSE <ls_link>-parent_request ).
+          lv_tr_status = get_transport_status( lv_request ).
+
           " Check if transport status has changed and update if needed
-          IF <ls_link>-request_status <> lv_current_tr_status.
-            <ls_link>-request_status = lv_current_tr_status.
-            <ls_link>-changed_by = sy-uname.
-            <ls_link>-changed_on = sy-datum.
-            <ls_link>-changed_at = sy-uzeit.
+          IF <ls_link>-request_status <> lv_tr_status.
+            <ls_link>-request_status = lv_tr_status.
             lv_status_updated = abap_true.
           ENDIF.
 
@@ -235,26 +310,39 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
 
           " Update if PR status changed
           IF <ls_link>-pr_status <> lv_new_status.
+            write_log( iv_log_handle = iv_log_handle
+                       iv_type       = 'I'
+                       iv_message    = |PR #{ <ls_link>-pr_id } status changed|
+                       iv_detail     = |{ <ls_link>-pr_status } -> { lv_new_status }, | &&
+                                       |Task: { <ls_link>-task_request }| ).
+
             <ls_link>-pr_status = lv_new_status.
-            <ls_link>-changed_by = sy-uname.
-            <ls_link>-changed_on = sy-datum.
-            <ls_link>-changed_at = sy-uzeit.
             lv_status_updated = abap_true.
           ENDIF.
 
           " Update database record if any status changed
           IF lv_status_updated = abap_true.
+            <ls_link>-changed_by = sy-uname.
+            <ls_link>-changed_on = sy-datum.
+            <ls_link>-changed_at = sy-uzeit.
+
             UPDATE zdt_pull_request FROM <ls_link>.
             IF sy-subrc = 0.
               lv_updated_count = lv_updated_count + 1.
             ELSE.
-              MESSAGE |Failed to update PR { <ls_link>-pr_id } in database| TYPE 'W'.
+              write_log( iv_log_handle = iv_log_handle
+                         iv_type       = 'W'
+                         iv_message    = |Failed to update PR { <ls_link>-pr_id } in database|
+                         iv_detail     = |Task: { <ls_link>-task_request }| ).
             ENDIF.
-            CLEAR lv_status_updated.
           ENDIF.
 
-        CATCH zcx_abapgit_exception INTO DATA(lx_error).
-          MESSAGE |Failed to sync PR { <ls_link>-pr_id }: { lx_error->get_text( ) }| TYPE 'W'.
+        CATCH cx_root INTO DATA(lx_error).
+          " A GitHub or network failure must not abort the sync of the remaining links
+          write_log( iv_log_handle = iv_log_handle
+                     iv_type       = 'W'
+                     iv_message    = |Failed to sync PR { <ls_link>-pr_id }|
+                     iv_detail     = |Error: { lx_error->get_text( ) }| ).
       ENDTRY.
     ENDLOOP.
 
@@ -263,7 +351,10 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
       COMMIT WORK.
     ENDIF.
 
-    MESSAGE |Sync completed. { lv_updated_count } PR(s) updated out of { lines( lt_links ) }. Transport status: { lv_current_tr_status }| TYPE 'S'.
+    write_log( iv_log_handle = iv_log_handle
+               iv_type       = 'S'
+               iv_message    = 'GitHub status sync completed'
+               iv_detail     = |{ lv_updated_count } of { lines( lt_links ) } PR link(s) updated| ).
 
   ENDMETHOD.
 
@@ -339,11 +430,30 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
 
     SELECT SINGLE trstatus FROM e070
       INTO rv_tr_status
-      WHERE trkorr = iv_parent_request.
+      WHERE trkorr = iv_request.
 
     IF sy-subrc <> 0.
       rv_tr_status = 'D'. " Default to Development
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD write_log.
+
+    " Logging must never interfere with the calling business process
+    IF iv_log_handle IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        zcl_abapgit_logging_utils=>write_application_log(
+            iv_log_handle = iv_log_handle
+            iv_log_type   = iv_type
+            iv_message    = iv_message
+            iv_detail     = iv_detail ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+    ENDTRY.
 
   ENDMETHOD.
 ENDCLASS.

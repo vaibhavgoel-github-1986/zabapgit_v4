@@ -5,6 +5,7 @@ REPORT zr_abapgit_pr_status_sync.
 
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
   PARAMETERS: p_treq TYPE e070-strkorr OBLIGATORY,
+              p_task TYPE e070-trkorr,
               p_prid TYPE int8,
               p_url  TYPE string LOWER CASE DEFAULT 'https://github.com/cisco-it-finance/sap-brim-github-repo.git'.
 SELECTION-SCREEN END OF BLOCK b1.
@@ -48,18 +49,23 @@ START-OF-SELECTION.
   TRY.
       CASE abap_true.
         WHEN r_disp.
-          " Display PR status
-          lt_links = zcl_abapgit_pr_status_manager=>get_pr_tr_linkage( p_treq ).
+          " Display PR status. Leaving the task empty lists every PR under the parent.
+          lt_links = zcl_abapgit_pr_status_manager=>get_pr_tr_linkage(
+            iv_parent_request = p_treq
+            iv_task_request   = p_task ).
           IF lines( lt_links ) = 0.
             WRITE: / 'No PR links found for transport request', p_treq.
           ELSE.
             WRITE: / 'PR Status for Transport Request:', p_treq.
             LOOP AT lt_links INTO DATA(ls_link).
-              WRITE: / 'PR ID:', ls_link-pr_id,
+              WRITE: / 'Task:', ls_link-task_request,
+                     / 'Owner:', ls_link-owner,
+                     / 'PR ID:', ls_link-pr_id,
                      / 'PR Status:', ls_link-pr_status,
                      / 'Transport Status:', ls_link-request_status,
                      / 'Created By:', ls_link-created_by, 'on', ls_link-created_on,
-                     / 'Changed By:', ls_link-changed_by, 'on', ls_link-changed_on.
+                     / 'Changed By:', ls_link-changed_by, 'on', ls_link-changed_on,
+                     /.
             ENDLOOP.
           ENDIF.
 
@@ -70,8 +76,9 @@ START-OF-SELECTION.
           ELSE.
             zcl_abapgit_pr_status_manager=>create_pr_link(
               iv_parent_request = p_treq
+              iv_task_request   = p_task
               iv_pr_id = p_prid ).
-            WRITE: / 'PR link created successfully for TR:', p_treq, 'PR:', p_prid.
+            WRITE: / 'PR link created successfully for TR:', p_treq, 'Task:', p_task, 'PR:', p_prid.
           ENDIF.
 
         WHEN r_excep.
@@ -84,6 +91,7 @@ START-OF-SELECTION.
 
           zcl_abapgit_pr_status_manager=>create_pr_link(
             iv_parent_request = p_treq
+            iv_task_request   = p_task
             iv_pr_id          = 0
             iv_pr_status      = 'EXCEPTION'
             iv_exception_reason = p_reason
@@ -97,6 +105,7 @@ START-OF-SELECTION.
           ELSE.
             zcl_abapgit_pr_status_manager=>update_pr_status(
               iv_parent_request = p_treq
+              iv_task_request   = p_task
               iv_pr_id = p_prid
               iv_pr_status = 'APPROVED' ).
             WRITE: / 'PR status updated to APPROVED for TR:', p_treq, 'PR:', p_prid.
@@ -111,6 +120,7 @@ START-OF-SELECTION.
             TRY.
                 zcl_abapgit_pr_status_manager=>sync_with_github(
                   iv_parent_request = p_treq
+                  iv_task_request   = p_task
                   iv_repo_url       = p_url ).
                 WRITE: / 'Sync operation completed successfully.'.
                 WRITE: / 'Check messages above for detailed results.'.
@@ -148,6 +158,7 @@ START-OF-SELECTION.
           ELSE.
             zcl_abapgit_pr_status_manager=>delete_pr_link(
               iv_parent_request = p_treq
+              iv_task_request   = p_task
               iv_pr_id = p_prid ).
             WRITE: / 'PR link deleted for TR:', p_treq, 'PR:', p_prid.
           ENDIF.

@@ -5,9 +5,11 @@ define root view entity ZI_PullRequest
   as select from zdt_pull_request as PullRequest
 {
   key parent_request    as ParentRequest,
+  key task_request      as TaskRequest,
       pr_id             as PrId,
       request_status    as RequestStatus,
       pr_status         as PrStatus,
+      owner             as Owner,
       exception_reason  as ExceptionReason,
       created_by        as CreatedBy,
       created_on        as CreatedOn,
