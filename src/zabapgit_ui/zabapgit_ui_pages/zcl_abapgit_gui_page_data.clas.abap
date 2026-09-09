@@ -100,8 +100,8 @@ CLASS zcl_abapgit_gui_page_data IMPLEMENTATION.
   METHOD add_via_transport.
 
     DATA lv_trkorr  TYPE trkorr.
-    DATA ls_request TYPE zif_abapgit_cts_api=>ty_transport_data.
-    DATA ls_key     LIKE LINE OF ls_request-keys.
+    DATA lt_keys    TYPE zif_abapgit_cts_api=>ty_transport_key_tt.
+    DATA ls_key     LIKE LINE OF lt_keys.
     DATA lv_where   TYPE string.
     DATA ls_config  TYPE zif_abapgit_data_config=>ty_config.
 
@@ -111,15 +111,17 @@ CLASS zcl_abapgit_gui_page_data IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    ls_request = zcl_abapgit_factory=>get_cts_api( )->read( lv_trkorr ).
+    " Works for a request and for a single task, customizing and workbench alike
+    lt_keys = zcl_abapgit_factory=>get_cts_api( )->list_data_keys_by_request( lv_trkorr ).
 
-    IF lines( ls_request-keys ) = 0.
-      zcx_abapgit_exception=>raise( |No keys found, select task| ).
+    IF lines( lt_keys ) = 0.
+      zcx_abapgit_exception=>raise( |No table keys found in { lv_trkorr }| ).
     ENDIF.
 
-    LOOP AT ls_request-keys INTO ls_key WHERE object = 'TABU'.
-      ASSERT ls_key-objname IS NOT INITIAL.
-      ASSERT ls_key-tabkey IS NOT INITIAL.
+    LOOP AT lt_keys INTO ls_key WHERE object = zif_abapgit_data_config=>c_data_type-tabu.
+      IF zcl_abapgit_data_utils=>does_table_exist( |{ to_upper( ls_key-objname ) }| ) = abap_false.
+        CONTINUE.
+      ENDIF.
 
       CLEAR ls_config.
       ls_config-type = zif_abapgit_data_config=>c_data_type-tabu.

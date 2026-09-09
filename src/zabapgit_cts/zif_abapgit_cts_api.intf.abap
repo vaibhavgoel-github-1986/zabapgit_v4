@@ -19,9 +19,11 @@ INTERFACE zif_abapgit_cts_api
       tabkey  TYPE e071k-tabkey,
     END OF ty_transport_key .
   TYPES:
+    ty_transport_key_tt TYPE STANDARD TABLE OF ty_transport_key WITH DEFAULT KEY .
+  TYPES:
     BEGIN OF ty_transport_data,
       trstatus TYPE e070-trstatus,
-      keys     TYPE STANDARD TABLE OF ty_transport_key WITH DEFAULT KEY,
+      keys     TYPE ty_transport_key_tt,
     END OF ty_transport_data .
   TYPES:
     BEGIN OF ty_transport_obj,
@@ -142,6 +144,18 @@ INTERFACE zif_abapgit_cts_api
       !iv_request    TYPE trkorr
     RETURNING
       VALUE(rt_list) TYPE ty_transport_obj_tt
+    RAISING
+      zcx_abapgit_exception .
+
+  "! Table entry keys (R3TR TABU/CDAT/TDAT/VDAT) recorded in a request and all of its tasks.
+  "! Customizing is recorded on task level, so the request alone does not carry the keys.
+  "! @parameter iv_request | Transport request or task
+  "! @parameter rt_keys | Table keys
+  METHODS list_data_keys_by_request
+    IMPORTING
+      !iv_request    TYPE trkorr
+    RETURNING
+      VALUE(rt_keys) TYPE ty_transport_key_tt
     RAISING
       zcx_abapgit_exception .
 

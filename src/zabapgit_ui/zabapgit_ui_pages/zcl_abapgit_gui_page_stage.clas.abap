@@ -279,6 +279,11 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
     TRY.
         LOOP AT it_files-local ASSIGNING <ls_local> WHERE item IS NOT INITIAL.
+          " Data files carry no package, they are transported as table entries
+          IF <ls_local>-item-devclass IS INITIAL.
+            APPEND <ls_local>-item TO lt_items.
+            CONTINUE.
+          ENDIF.
           IF li_cts_api->is_chrec_possible_for_package( <ls_local>-item-devclass ) = abap_false.
             RETURN. " Assume all other objects are also in packages without change recording
           ENDIF.

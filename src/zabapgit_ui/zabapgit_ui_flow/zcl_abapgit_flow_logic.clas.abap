@@ -36,6 +36,13 @@ CLASS zcl_abapgit_flow_logic DEFINITION PUBLIC.
 
     TYPES ty_transports_tt TYPE STANDARD TABLE OF ty_transport WITH DEFAULT KEY.
 
+    TYPES: BEGIN OF ty_data_package,
+             name     TYPE tadir-obj_name,
+             devclass TYPE tadir-devclass,
+           END OF ty_data_package.
+
+    TYPES ty_data_packages_tt TYPE SORTED TABLE OF ty_data_package WITH UNIQUE KEY name.
+
     TYPES ty_trkorr_tt TYPE STANDARD TABLE OF trkorr WITH DEFAULT KEY.
 
     CLASS-METHODS consolidate_files
@@ -127,6 +134,15 @@ CLASS zcl_abapgit_flow_logic DEFINITION PUBLIC.
     CLASS-METHODS find_open_transports
       RETURNING
         VALUE(rt_transports) TYPE ty_transports_tt
+      RAISING
+        zcx_abapgit_exception.
+
+    "! Tables declared in the data configuration of a repository, mapped to the repository package.
+    "! Config tables live in SAP packages, so this is the only link between a table entry
+    "! recorded in a customizing transport and a repository.
+    CLASS-METHODS data_config_packages
+      RETURNING
+        VALUE(rt_packages) TYPE ty_data_packages_tt
       RAISING
         zcx_abapgit_exception.
 
@@ -399,13 +415,15 @@ CLASS ZCL_ABAPGIT_FLOW_LOGIC IMPLEMENTATION.
 
   METHOD find_open_transports.
 
-    DATA lt_trkorr   TYPE zif_abapgit_cts_api=>ty_trkorr_tt.
-    DATA lv_trkorr   LIKE LINE OF lt_trkorr.
-    DATA ls_result   LIKE LINE OF rt_transports.
-    DATA lt_objects  TYPE zif_abapgit_cts_api=>ty_transport_obj_tt.
-    DATA lv_obj_name TYPE tadir-obj_name.
-    DATA lt_date     TYPE zif_abapgit_cts_api=>ty_date_range.
-    DATA ls_date     LIKE LINE OF lt_date.
+    DATA lt_trkorr        TYPE zif_abapgit_cts_api=>ty_trkorr_tt.
+    DATA lv_trkorr        LIKE LINE OF lt_trkorr.
+    DATA ls_result        LIKE LINE OF rt_transports.
+    DATA lt_objects       TYPE zif_abapgit_cts_api=>ty_transport_obj_tt.
+    DATA lv_obj_name      TYPE tadir-obj_name.
+    DATA lt_date          TYPE zif_abapgit_cts_api=>ty_date_range.
+    DATA ls_date          LIKE LINE OF lt_date.
+    DATA lt_data_packages TYPE ty_data_packages_tt.
+    DATA ls_data_package  LIKE LINE OF lt_data_packages.
 
     FIELD-SYMBOLS <ls_object> LIKE LINE OF lt_objects.
 
@@ -417,6 +435,8 @@ CLASS ZCL_ABAPGIT_FLOW_LOGIC IMPLEMENTATION.
 
     lt_trkorr = zcl_abapgit_factory=>get_cts_api( )->list_open_requests( it_date = lt_date ).
 
+    lt_data_packages = data_config_packages( ).
+
     LOOP AT lt_trkorr INTO lv_trkorr.
       ls_result-trkorr = lv_trkorr.
       ls_result-title  = zcl_abapgit_factory=>get_cts_api( )->read_description( lv_trkorr ).
@@ -427,14 +447,50 @@ CLASS ZCL_ABAPGIT_FLOW_LOGIC IMPLEMENTATION.
         ls_result-obj_name = <ls_object>-obj_name.
 
         lv_obj_name = <ls_object>-obj_name.
-        ls_result-devclass = zcl_abapgit_factory=>get_tadir( )->read_single(
-          iv_object   = ls_result-object
-          iv_obj_name = lv_obj_name )-devclass.
+        CLEAR ls_result-devclass.
+
+        IF ls_result-object = zif_abapgit_data_config=>c_data_type-tabu.
+          READ TABLE lt_data_packages INTO ls_data_package WITH TABLE KEY name = lv_obj_name.
+          IF sy-subrc = 0.
+            ls_result-devclass = ls_data_package-devclass.
+          ENDIF.
+        ELSE.
+          ls_result-devclass = zcl_abapgit_factory=>get_tadir( )->read_single(
+            iv_object   = ls_result-object
+            iv_obj_name = lv_obj_name )-devclass.
+        ENDIF.
+
         IF ls_result-devclass IS NOT INITIAL.
           INSERT ls_result INTO TABLE rt_transports.
         ENDIF.
       ENDLOOP.
 
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD data_config_packages.
+
+    DATA lt_repos   TYPE ty_repos_tt.
+    DATA li_online  TYPE REF TO zif_abapgit_repo_online.
+    DATA li_repo    TYPE REF TO zif_abapgit_repo.
+    DATA lt_configs TYPE zif_abapgit_data_config=>ty_config_tt.
+    DATA ls_config  LIKE LINE OF lt_configs.
+    DATA ls_package LIKE LINE OF rt_packages.
+
+    lt_repos = list_repos( ).
+
+    LOOP AT lt_repos INTO li_online.
+      li_repo ?= li_online.
+
+      lt_configs = li_repo->get_data_config( )->get_configs( ).
+
+      LOOP AT lt_configs INTO ls_config WHERE type = zif_abapgit_data_config=>c_data_type-tabu.
+        ls_package-name     = ls_config-name.
+        ls_package-devclass = li_repo->get_package( ).
+        INSERT ls_package INTO TABLE rt_packages.
+      ENDLOOP.
     ENDLOOP.
 
   ENDMETHOD.

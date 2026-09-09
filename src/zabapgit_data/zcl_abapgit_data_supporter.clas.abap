@@ -10,9 +10,25 @@ CLASS zcl_abapgit_data_supporter DEFINITION
   PROTECTED SECTION.
   PRIVATE SECTION.
 
+    TYPES:
+      BEGIN OF ty_buffer,
+        tabname   TYPE tadir-obj_name,
+        supported TYPE abap_bool,
+      END OF ty_buffer .
+
     DATA mt_supported_objects TYPE zif_abapgit_data_supporter=>ty_objects.
+    DATA mt_buffer TYPE HASHED TABLE OF ty_buffer WITH UNIQUE KEY tabname.
 
     METHODS get_supported_objects.
+
+    "! Check if the table holds customizing, ie. is recordable in a customizing transport
+    "! @parameter iv_name | Table name
+    "! @parameter rv_customizing | Table has a customizing delivery class
+    METHODS is_customizing_table
+      IMPORTING
+        !iv_name              TYPE tadir-obj_name
+      RETURNING
+        VALUE(rv_customizing) TYPE abap_bool .
 
 ENDCLASS.
 
@@ -57,6 +73,31 @@ CLASS zcl_abapgit_data_supporter IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD is_customizing_table.
+
+    DATA ls_buffer TYPE ty_buffer.
+
+    FIELD-SYMBOLS <ls_buffer> LIKE LINE OF mt_buffer.
+
+    ls_buffer-tabname = iv_name.
+
+    READ TABLE mt_buffer ASSIGNING <ls_buffer> WITH TABLE KEY tabname = ls_buffer-tabname.
+    IF sy-subrc = 0.
+      rv_customizing = <ls_buffer>-supported.
+      RETURN.
+    ENDIF.
+
+    " abap_undefined is returned for unknown tables, so compare explicitly
+    IF zcl_abapgit_data_utils=>is_customizing_table( iv_name ) = abap_true.
+      rv_customizing = abap_true.
+    ENDIF.
+
+    ls_buffer-supported = rv_customizing.
+    INSERT ls_buffer INTO TABLE mt_buffer.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_data_supporter~is_object_supported.
 
     FIELD-SYMBOLS <ls_object> LIKE LINE OF mt_supported_objects.
@@ -69,14 +110,20 @@ CLASS zcl_abapgit_data_supporter IMPLEMENTATION.
       WITH TABLE KEY type = iv_type name = iv_name.
     IF sy-subrc = 0.
       rv_supported = abap_true.
-    ELSE.
-      " Check if object name matches pattern
-      LOOP AT mt_supported_objects ASSIGNING <ls_object> WHERE type = iv_type.
-        IF iv_name CP <ls_object>-name.
-          rv_supported = abap_true.
-          RETURN.
-        ENDIF.
-      ENDLOOP.
+      RETURN.
+    ENDIF.
+
+    " Check if object name matches pattern
+    LOOP AT mt_supported_objects ASSIGNING <ls_object> WHERE type = iv_type.
+      IF iv_name CP <ls_object>-name.
+        rv_supported = abap_true.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+    " Customizing tables are transported as table entries, so they can be serialized as data too
+    IF iv_type = zif_abapgit_data_config=>c_data_type-tabu.
+      rv_supported = is_customizing_table( iv_name ).
     ENDIF.
 
   ENDMETHOD.

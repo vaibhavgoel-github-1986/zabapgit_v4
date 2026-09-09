@@ -603,8 +603,39 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
         INTO TABLE rt_trkorr
         FOR ALL ENTRIES IN lt_e070
         WHERE trkorr = lt_e070-strkorr
-        AND trfunction = zif_abapgit_cts_api=>c_transport_type-wb_request.
+        AND ( trfunction = zif_abapgit_cts_api=>c_transport_type-wb_request
+           OR trfunction = zif_abapgit_cts_api=>c_transport_type-cust_request ).
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_cts_api~list_data_keys_by_request.
+
+    DATA lt_trkorr TYPE STANDARD TABLE OF trkorr WITH DEFAULT KEY.
+
+    APPEND iv_request TO lt_trkorr.
+
+* customizing entries are recorded on task level, so the tasks have to be read too
+    SELECT trkorr FROM e070
+      APPENDING TABLE lt_trkorr
+      WHERE strkorr = iv_request
+      ORDER BY PRIMARY KEY.
+
+    SELECT object objname tabkey FROM e071k
+      INTO TABLE rt_keys
+      FOR ALL ENTRIES IN lt_trkorr
+      WHERE trkorr = lt_trkorr-table_line
+      AND pgmid = 'R3TR'
+      ORDER BY PRIMARY KEY.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    DELETE rt_keys WHERE objname IS INITIAL OR tabkey IS INITIAL.
+
+    SORT rt_keys BY object objname tabkey.
+    DELETE ADJACENT DUPLICATES FROM rt_keys COMPARING object objname tabkey.
 
   ENDMETHOD.
 

@@ -173,7 +173,7 @@ CLASS zcl_abapgit_data_utils IMPLEMENTATION.
         SELECT SINGLE contflag FROM ('DD02L') INTO lv_contflag WHERE tabname = iv_name.
     ENDTRY.
 
-    IF lv_contflag = 'C'.
+    IF lv_contflag = 'C' OR lv_contflag = 'G'.
       rv_customizing = abap_true.
     ELSEIF lv_contflag IS NOT INITIAL.
       rv_customizing = abap_false.

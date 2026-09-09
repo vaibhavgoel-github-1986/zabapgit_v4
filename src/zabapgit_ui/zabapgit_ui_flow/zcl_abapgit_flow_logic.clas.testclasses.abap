@@ -239,6 +239,9 @@ CLASS lcl_cts IMPLEMENTATION.
   METHOD zif_abapgit_cts_api~list_r3tr_by_request.
     rt_list = mo_data->list_r3tr_by_request( iv_request ).
   ENDMETHOD.
+  METHOD zif_abapgit_cts_api~list_data_keys_by_request.
+    RETURN. " todo, implement method
+  ENDMETHOD.
   METHOD zif_abapgit_cts_api~read.
     RETURN. " todo, implement method
   ENDMETHOD.

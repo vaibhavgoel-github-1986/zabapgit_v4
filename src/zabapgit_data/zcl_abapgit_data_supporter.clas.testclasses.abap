@@ -20,6 +20,7 @@ CLASS ltcl_supporter DEFINITION FOR TESTING RISK LEVEL HARMLESS
   PRIVATE SECTION.
     METHODS:
       is_not_supported FOR TESTING,
+      is_customizing_supported FOR TESTING,
       is_supported FOR TESTING.
 
 ENDCLASS.
@@ -32,14 +33,29 @@ CLASS ltcl_supporter IMPLEMENTATION.
 
     DATA lv_act TYPE abap_bool.
 
-    " By default, SAP tables are not supported
+    " Application tables are not supported, only customizing tables are
     lv_act = zcl_abapgit_data_factory=>get_supporter( )->is_object_supported(
       iv_type = zif_abapgit_data_config=>c_data_type-tabu
-      iv_name = 'T005' ).
+      iv_name = 'MARA' ).
 
     cl_abap_unit_assert=>assert_equals(
       act = lv_act
       exp = abap_false ).
+
+  ENDMETHOD.
+
+  METHOD is_customizing_supported.
+
+    DATA lv_act TYPE abap_bool.
+
+    " SAP customizing tables can be serialized, they are transported as table entries
+    lv_act = zcl_abapgit_data_factory=>get_supporter( )->is_object_supported(
+      iv_type = zif_abapgit_data_config=>c_data_type-tabu
+      iv_name = 'TVARVC' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_act
+      exp = abap_true ).
 
   ENDMETHOD.
 
