@@ -4,6 +4,11 @@ CLASS ltcl_data_utils_test DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURA
     METHODS build_data_filename FOR TESTING RAISING cx_static_check.
     METHODS build_config_filename FOR TESTING RAISING cx_static_check.
     METHODS build_table_itab FOR TESTING RAISING cx_static_check.
+    METHODS tabkey_to_where1 FOR TESTING RAISING cx_static_check.
+    METHODS tabkey_to_where2 FOR TESTING RAISING cx_static_check.
+    METHODS tabkey_to_where3 FOR TESTING RAISING cx_static_check.
+    METHODS tabkey_to_where4 FOR TESTING RAISING cx_static_check.
+    METHODS with_mandt FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -65,6 +70,81 @@ CLASS ltcl_data_utils_test IMPLEMENTATION.
 
     READ TABLE <lt_tab> ASSIGNING <ls_row> FROM ls_row.
     cl_abap_unit_assert=>assert_subrc( ).
+
+  ENDMETHOD.
+
+  METHOD tabkey_to_where1.
+
+    DATA lv_where TYPE string.
+
+    lv_where = zcl_abapgit_data_utils=>tabkey_to_where(
+      iv_table  = 'T100'
+      iv_tabkey = 'EABC55555555555555555001' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_where
+      exp = |sprsl = 'E' AND arbgb = 'ABC55555555555555555' AND msgnr = '001'| ).
+
+  ENDMETHOD.
+
+  METHOD tabkey_to_where2.
+
+    DATA lv_where TYPE string.
+
+    lv_where = zcl_abapgit_data_utils=>tabkey_to_where(
+      iv_table  = 'T100'
+      iv_tabkey = 'ESHORT' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_where
+      exp = |sprsl = 'E' AND arbgb = 'SHORT' AND msgnr = ''| ).
+
+  ENDMETHOD.
+
+  METHOD tabkey_to_where3.
+
+    DATA lv_where TYPE string.
+
+    lv_where = zcl_abapgit_data_utils=>tabkey_to_where(
+      iv_table  = 'T100'
+      iv_tabkey = 'ESHORT               001' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_where
+      exp = |sprsl = 'E' AND arbgb = 'SHORT' AND msgnr = '001'| ).
+
+  ENDMETHOD.
+
+  METHOD tabkey_to_where4.
+
+    DATA lv_where TYPE string.
+
+    lv_where = zcl_abapgit_data_utils=>tabkey_to_where(
+      iv_table  = 'T100'
+      iv_tabkey = 'ESHORT               0' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_where
+      exp = |sprsl = 'E' AND arbgb = 'SHORT' AND msgnr = '0'| ).
+
+  ENDMETHOD.
+
+  METHOD with_mandt.
+
+    DATA lv_where TYPE string.
+
+    IF sy-sysid = 'ABC'.
+* don't run on open-abap
+      RETURN.
+    ENDIF.
+
+    lv_where = zcl_abapgit_data_utils=>tabkey_to_where(
+      iv_table  = 'USR02'
+      iv_tabkey = '100ASDF' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_where
+      exp = |bname = 'ASDF'| ).
 
   ENDMETHOD.
 
