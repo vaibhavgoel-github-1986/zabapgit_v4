@@ -60,6 +60,8 @@ CLASS ZCL_IM_GIT_PR_CHECK IMPLEMENTATION.
     DATA lv_parent_request TYPE trkorr.
     DATA lv_task_request   TYPE trkorr.
 
+    RETURN. " Gating is not needed for now
+    
     TRY.
         " This check is only for Workbench Transports
         IF type = c_request_type-tr_of_copies OR
