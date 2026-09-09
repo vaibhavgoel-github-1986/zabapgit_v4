@@ -46,7 +46,7 @@ CLASS zcl_abapgit_data_utils DEFINITION
     "! Convert a concatenated table key, as recorded in E071K, into a WHERE condition
     CLASS-METHODS tabkey_to_where
       IMPORTING
-        !iv_table       TYPE tabname
+        !iv_table       TYPE tadir-obj_name
         !iv_tabkey      TYPE clike
       RETURNING
         VALUE(rv_where) TYPE string
@@ -275,15 +275,13 @@ CLASS zcl_abapgit_data_utils IMPLEMENTATION.
     DATA lo_typedescr TYPE REF TO cl_abap_typedescr.
     DATA lt_fields    TYPE ty_names.
     DATA lv_field     LIKE LINE OF lt_fields.
-    DATA lv_table     TYPE tadir-obj_name.
     DATA lv_length    TYPE i.
     DATA lv_tabix     TYPE i.
     DATA lv_key       TYPE c LENGTH 900.
 
     lv_key = iv_tabkey.
-    lv_table = iv_table.
 
-    lt_fields = list_key_fields( lv_table ).
+    lt_fields = list_key_fields( iv_table ).
 
     LOOP AT lt_fields INTO lv_field.
       lv_tabix = sy-tabix.

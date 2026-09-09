@@ -119,7 +119,7 @@ CLASS zcl_abapgit_gui_page_data IMPLEMENTATION.
       ls_config-type = zif_abapgit_data_config=>c_data_type-tabu.
       ls_config-name = to_upper( ls_key-objname ).
       lv_where = zcl_abapgit_data_utils=>tabkey_to_where(
-        iv_table  = ls_key-objname
+        iv_table  = ls_config-name
         iv_tabkey = ls_key-tabkey ).
       APPEND lv_where TO ls_config-where.
       mi_config->add_config( ls_config ).
