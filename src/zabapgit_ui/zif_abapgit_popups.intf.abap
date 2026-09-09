@@ -95,6 +95,9 @@ INTERFACE zif_abapgit_popups
     RAISING
       zcx_abapgit_exception .
   METHODS popup_to_select_transport
+    IMPORTING
+      !iv_trfunctions  TYPE zif_abapgit_cts_api=>ty_transport_functions
+                       DEFAULT zif_abapgit_cts_api=>c_transport_functions-all
     RETURNING
       VALUE(rv_trkorr) TYPE trkorr .
   METHODS popup_to_select_from_list

@@ -77,6 +77,14 @@ CLASS zcl_abapgit_gui_router DEFINITION
         VALUE(ro_filter) TYPE REF TO zcl_abapgit_object_filter_tran
       RAISING
         zcx_abapgit_exception.
+    "! Register the table entries of a transport in the data configuration, otherwise
+    "! customizing recorded in the request is not serialized and cannot be staged.
+    METHODS add_transport_data_config
+      IMPORTING
+        ii_repo   TYPE REF TO zif_abapgit_repo
+        iv_trkorr TYPE trkorr
+      RAISING
+        zcx_abapgit_exception.
     METHODS repository_services
       IMPORTING
         !ii_event         TYPE REF TO zif_abapgit_gui_event
@@ -492,13 +500,13 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
     DATA lv_trkorr TYPE trkorr.
     DATA lv_unreleased_tasks TYPE i.
 
-    " Use simple transport input popup. Sub-tasks (S/X) are allowed so that each
+    " Use simple transport input popup. Sub-tasks (S/X/Q) are allowed so that each
     " developer working in a shared parent request can raise their own pull request.
     CALL FUNCTION 'TR_POPUP_INPUT_REQUEST'
       EXPORTING
         iv_title               = 'Request / Task'
         iv_description         = 'Request'
-        iv_trfunctions         = 'KTRSX'
+        iv_trfunctions         = 'KTRSXWQ'
       IMPORTING
         ev_trkorr              = lv_trkorr                 " Request number
       EXCEPTIONS
@@ -521,7 +529,7 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
     ENDIF.
 
     CASE ls_request-trfunction.
-      WHEN 'K' OR 'Q'.
+      WHEN 'K' OR 'W' OR 'T'.
         " Parent request: objects are only merged into the parent once every task is
         " released, so staging a parent still requires all sub-tasks to be released.
         SELECT COUNT( * )
@@ -534,7 +542,7 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
                                         |unreleased subtask(s). All subtasks must be released before staging| ).
         ENDIF.
 
-      WHEN 'S' OR 'X'.
+      WHEN 'S' OR 'X' OR 'R' OR 'Q'.
         " Sub-task: the task keeps its own E071 entries after release, so only the
         " objects owned by this developer are staged.
         IF ls_request-strkorr IS INITIAL.
@@ -546,7 +554,7 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
         ENDIF.
 
       WHEN OTHERS.
-        zcx_abapgit_exception=>raise( |{ lv_trkorr } is neither a workbench request nor a task| ).
+        zcx_abapgit_exception=>raise( |{ lv_trkorr } is neither a request nor a task| ).
     ENDCASE.
 
     " Convert single transport to range table format for filter
@@ -554,9 +562,52 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
 
     li_repo = zcl_abapgit_repo_srv=>get_instance( )->get( iv_key ).
 
+    add_transport_data_config(
+      ii_repo   = li_repo
+      iv_trkorr = lv_trkorr ).
+
     CREATE OBJECT ro_filter.
     ro_filter->set_filter_values( iv_package  = li_repo->get_package( )
                                 it_r_trkorr = lt_r_trkorr ).
+
+  ENDMETHOD.
+
+
+  METHOD add_transport_data_config.
+
+    DATA li_config TYPE REF TO zif_abapgit_data_config.
+    DATA lt_keys   TYPE zif_abapgit_cts_api=>ty_transport_key_tt.
+    DATA ls_key    LIKE LINE OF lt_keys.
+    DATA ls_config TYPE zif_abapgit_data_config=>ty_config.
+
+    lt_keys = zcl_abapgit_factory=>get_cts_api( )->list_data_keys_by_request( iv_trkorr ).
+    IF lt_keys IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " The config instance is only cached once the remote files are read
+    ii_repo->get_files_remote( ).
+
+    li_config = ii_repo->get_data_config( ).
+
+    LOOP AT lt_keys INTO ls_key WHERE object = zif_abapgit_data_config=>c_data_type-tabu.
+      CLEAR ls_config.
+      ls_config-type = zif_abapgit_data_config=>c_data_type-tabu.
+      ls_config-name = to_upper( ls_key-objname ).
+
+      IF zcl_abapgit_data_utils=>does_table_exist( ls_config-name ) = abap_false
+          OR zcl_abapgit_data_factory=>get_supporter( )->is_object_supported(
+               iv_type = ls_config-type
+               iv_name = ls_config-name ) = abap_false.
+        CONTINUE.
+      ENDIF.
+
+      APPEND zcl_abapgit_data_utils=>tabkey_to_where(
+        iv_table  = ls_config-name
+        iv_tabkey = ls_key-tabkey ) TO ls_config-where.
+
+      li_config->add_config( ls_config ).
+    ENDLOOP.
 
   ENDMETHOD.
 

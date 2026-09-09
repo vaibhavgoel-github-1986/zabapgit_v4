@@ -359,7 +359,8 @@ CLASS zcl_abapgit_transport IMPLEMENTATION.
     IF is_trkorr IS SUPPLIED.
       APPEND is_trkorr-trkorr TO lt_trkorr.
     ELSE.
-      lv_trkorr = zcl_abapgit_ui_factory=>get_popups( )->popup_to_select_transport( ).
+      lv_trkorr = zcl_abapgit_ui_factory=>get_popups( )->popup_to_select_transport(
+        zif_abapgit_cts_api=>c_transport_functions-workbench ).
       IF lv_trkorr IS NOT INITIAL.
         APPEND lv_trkorr TO lt_trkorr.
       ENDIF.

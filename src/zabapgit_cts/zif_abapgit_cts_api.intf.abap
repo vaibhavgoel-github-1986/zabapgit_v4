@@ -41,6 +41,14 @@ INTERFACE zif_abapgit_cts_api
       cust_request TYPE c LENGTH 1 VALUE 'W', "customizing request
       cust_task    TYPE c LENGTH 1 VALUE 'Q', "customizing task
     END OF c_transport_type .
+  "! Transport function filters, as expected by TR_F4_REQUESTS
+  TYPES ty_transport_functions TYPE c LENGTH 5 .
+  CONSTANTS:
+    BEGIN OF c_transport_functions,
+      workbench   TYPE ty_transport_functions VALUE 'KRS',
+      customizing TYPE ty_transport_functions VALUE 'WQ',
+      all         TYPE ty_transport_functions VALUE 'KRSWQ',
+    END OF c_transport_functions .
   CONSTANTS:
     BEGIN OF c_transport_category,
       workbench   TYPE c LENGTH 4 VALUE 'SYST',

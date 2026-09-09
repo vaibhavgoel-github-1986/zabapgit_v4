@@ -864,7 +864,8 @@ CLASS zcl_abapgit_services_repo IMPLEMENTATION.
 
     li_repo_online ?= zcl_abapgit_repo_srv=>get_instance( )->get( iv_repository_key ).
 
-    lv_trkorr = zcl_abapgit_ui_factory=>get_popups( )->popup_to_select_transport( ).
+    lv_trkorr = zcl_abapgit_ui_factory=>get_popups( )->popup_to_select_transport(
+      zif_abapgit_cts_api=>c_transport_functions-workbench ).
     " Also include deleted objects that are included in transport
     lt_transport_objects = zcl_abapgit_transport=>to_tadir(
       iv_trkorr          = lv_trkorr

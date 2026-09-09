@@ -43,6 +43,15 @@ CLASS zcl_abapgit_data_utils DEFINITION
         VALUE(rt_names) TYPE ty_names
       RAISING
         zcx_abapgit_exception.
+    "! Convert a concatenated table key, as recorded in E071K, into a WHERE condition
+    CLASS-METHODS tabkey_to_where
+      IMPORTING
+        !iv_table       TYPE tabname
+        !iv_tabkey      TYPE clike
+      RETURNING
+        VALUE(rv_where) TYPE string
+      RAISING
+        zcx_abapgit_exception.
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
@@ -187,8 +196,7 @@ CLASS zcl_abapgit_data_utils IMPLEMENTATION.
   METHOD jump.
 
     " Run SE16 with authorization check
-    CALL FUNCTION 'RS_TABLE_LIST_CREATE'
-      EXPORTING
+    CALL FUNCTION 'RS_TABLE_LIST_CREATE'      EXPORTING
         table_name         = is_item-obj_name
       EXCEPTIONS
         table_is_structure = 1
@@ -258,6 +266,44 @@ CLASS zcl_abapgit_data_utils IMPLEMENTATION.
           APPEND <lv_field> TO rt_names.
         ENDLOOP.
     ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD tabkey_to_where.
+
+    DATA lo_typedescr TYPE REF TO cl_abap_typedescr.
+    DATA lt_fields    TYPE ty_names.
+    DATA lv_field     LIKE LINE OF lt_fields.
+    DATA lv_table     TYPE tadir-obj_name.
+    DATA lv_length    TYPE i.
+    DATA lv_tabix     TYPE i.
+    DATA lv_key       TYPE c LENGTH 900.
+
+    lv_key = iv_tabkey.
+    lv_table = iv_table.
+
+    lt_fields = list_key_fields( lv_table ).
+
+    LOOP AT lt_fields INTO lv_field.
+      lv_tabix = sy-tabix.
+      lo_typedescr = cl_abap_typedescr=>describe_by_name( |{ iv_table }-{ lv_field }| ).
+      lv_length = lo_typedescr->length / cl_abap_char_utilities=>charsize.
+
+      IF lv_tabix = 1 AND lo_typedescr->get_relative_name( ) = 'MANDT'.
+        lv_key = lv_key+lv_length.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_key = |*|.
+        EXIT.
+      ENDIF.
+      IF rv_where IS NOT INITIAL.
+        rv_where = |{ rv_where } AND |.
+      ENDIF.
+      rv_where = |{ rv_where }{ to_lower( lv_field ) } = '{ lv_key(lv_length) }'|.
+      lv_key = lv_key+lv_length.
+    ENDLOOP.
 
   ENDMETHOD.
 ENDCLASS.

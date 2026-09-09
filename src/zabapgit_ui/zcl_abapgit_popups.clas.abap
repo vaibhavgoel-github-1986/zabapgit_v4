@@ -752,6 +752,8 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
   METHOD zif_abapgit_popups~popup_to_select_transport.
 
     CALL FUNCTION 'TR_F4_REQUESTS'
+      EXPORTING
+        iv_trfunctions      = iv_trfunctions
       IMPORTING
         ev_selected_request = rv_trkorr.
 
