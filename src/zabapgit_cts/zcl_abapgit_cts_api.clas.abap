@@ -626,8 +626,7 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
       INTO TABLE rt_keys
       FOR ALL ENTRIES IN lt_trkorr
       WHERE trkorr = lt_trkorr-table_line
-      AND pgmid = 'R3TR'
-      ORDER BY PRIMARY KEY.
+      AND pgmid = 'R3TR'.                               "#EC CI_NOORDER
     IF sy-subrc <> 0.
       RETURN.
     ENDIF.
