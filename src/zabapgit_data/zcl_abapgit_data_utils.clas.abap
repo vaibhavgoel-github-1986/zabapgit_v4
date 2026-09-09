@@ -196,7 +196,8 @@ CLASS zcl_abapgit_data_utils IMPLEMENTATION.
   METHOD jump.
 
     " Run SE16 with authorization check
-    CALL FUNCTION 'RS_TABLE_LIST_CREATE'      EXPORTING
+    CALL FUNCTION 'RS_TABLE_LIST_CREATE'
+      EXPORTING
         table_name         = is_item-obj_name
       EXCEPTIONS
         table_is_structure = 1
