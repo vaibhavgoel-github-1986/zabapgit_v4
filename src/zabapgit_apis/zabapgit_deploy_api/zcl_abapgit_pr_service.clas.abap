@@ -190,6 +190,12 @@ CLASS zcl_abapgit_pr_service DEFINITION
       RAISING
         zcx_abapgit_exception .
 
+    METHODS normalize_branch
+      IMPORTING
+        !iv_branch       TYPE string
+      RETURNING
+        VALUE(rv_branch) TYPE string .
+
     METHODS remote_branch_exists
       IMPORTING
         !iv_branch       TYPE string
@@ -342,12 +348,14 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
     ELSE.
       rs_preview-source_branch = is_request-branch_name.
     ENDIF.
+    rs_preview-source_branch = normalize_branch( rs_preview-source_branch ).
 
     IF is_request-target_branch IS INITIAL.
       rs_preview-target_branch = resolve_target_branch( ).
     ELSE.
       rs_preview-target_branch = is_request-target_branch.
     ENDIF.
+    rs_preview-target_branch = normalize_branch( rs_preview-target_branch ).
 
     rs_preview-reviewers = determine_reviewers( iv_owner    = rs_preview-owner
                                                 it_override = is_request-reviewers ).
@@ -817,6 +825,18 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
     rv_branch = zcl_abapgit_git_factory=>get_git_transport(
       )->branches( mi_repo_online->get_url( )
       )->get_head_symref( ).
+
+  ENDMETHOD.
+
+
+  METHOD normalize_branch.
+
+    rv_branch = iv_branch.
+
+    " create_branch and select_branch assert on a fully qualified ref
+    IF rv_branch IS NOT INITIAL AND rv_branch NP zif_abapgit_git_definitions=>c_git_branch-heads.
+      rv_branch = |{ zif_abapgit_git_definitions=>c_git_branch-heads_prefix }{ rv_branch }|.
+    ENDIF.
 
   ENDMETHOD.
 
