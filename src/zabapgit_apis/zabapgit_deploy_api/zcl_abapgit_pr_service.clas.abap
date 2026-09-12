@@ -156,6 +156,14 @@ CLASS zcl_abapgit_pr_service DEFINITION
       RAISING
         zcx_abapgit_exception .
 
+    METHODS restrict_to_filter
+      IMPORTING
+        !ii_filter TYPE REF TO zif_abapgit_object_filter
+      CHANGING
+        !cs_files  TYPE zif_abapgit_definitions=>ty_stage_files
+      RAISING
+        zcx_abapgit_exception .
+
     METHODS map_files
       IMPORTING
         !is_files       TYPE zif_abapgit_definitions=>ty_stage_files
@@ -596,11 +604,24 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
     DATA lo_filter   TYPE REF TO zcl_abapgit_object_filter_tran.
     DATA lt_r_trkorr TYPE zif_abapgit_definitions=>ty_trrngtrkor_tt.
     DATA ls_r_trkorr LIKE LINE OF lt_r_trkorr.
+    DATA lt_tasks    TYPE STANDARD TABLE OF trkorr WITH DEFAULT KEY.
+    DATA lv_task     TYPE trkorr.
 
     ls_r_trkorr-sign   = 'I'.
     ls_r_trkorr-option = 'EQ'.
     ls_r_trkorr-low    = iv_transport.
     APPEND ls_r_trkorr TO lt_r_trkorr.
+
+    " Objects are recorded on the tasks, so a parent request has to pull its tasks in as well.
+    " Applies to workbench and customizing requests alike.
+    SELECT trkorr FROM e070
+      INTO TABLE @lt_tasks
+      WHERE strkorr = @iv_transport.
+
+    LOOP AT lt_tasks INTO lv_task.
+      ls_r_trkorr-low = lv_task.
+      APPEND ls_r_trkorr TO lt_r_trkorr.
+    ENDLOOP.
 
     CREATE OBJECT lo_filter.
 
@@ -614,9 +635,87 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
 
   METHOD collect_stage_files.
 
+    DATA li_filter TYPE REF TO zif_abapgit_object_filter.
+
+    li_filter = build_object_filter( iv_transport ).
+
     rs_files = zcl_abapgit_stage_logic=>get_stage_logic( )->get(
       ii_repo_online = mi_repo
-      ii_obj_filter  = build_object_filter( iv_transport ) ).
+      ii_obj_filter  = li_filter ).
+
+    " ZCL_ABAPGIT_SERIALIZE=>ADD_DATA appends every data file regardless of the object
+    " filter, so table content has to be scoped back to the transport here
+    restrict_to_filter( EXPORTING ii_filter = li_filter
+                        CHANGING  cs_files  = rs_files ).
+
+  ENDMETHOD.
+
+
+  METHOD restrict_to_filter.
+
+    TYPES: BEGIN OF lty_key,
+             obj_type TYPE tadir-object,
+             obj_name TYPE tadir-obj_name,
+           END OF lty_key.
+
+    DATA lt_keys   TYPE HASHED TABLE OF lty_key WITH UNIQUE KEY obj_type obj_name.
+    DATA ls_key    TYPE lty_key.
+    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    DATA ls_item   TYPE zif_abapgit_definitions=>ty_item.
+    DATA lt_local  LIKE cs_files-local.
+    DATA lt_remote LIKE cs_files-remote.
+
+    FIELD-SYMBOLS <ls_filter> LIKE LINE OF lt_filter.
+    FIELD-SYMBOLS <ls_local>  LIKE LINE OF cs_files-local.
+    FIELD-SYMBOLS <ls_remote> LIKE LINE OF cs_files-remote.
+
+    lt_filter = ii_filter->get_filter( ).
+
+    LOOP AT lt_filter ASSIGNING <ls_filter>.
+      ls_key-obj_type = <ls_filter>-object.
+      ls_key-obj_name = <ls_filter>-obj_name.
+      INSERT ls_key INTO TABLE lt_keys.
+    ENDLOOP.
+
+    LOOP AT cs_files-local ASSIGNING <ls_local>.
+      ls_key-obj_type = <ls_local>-item-obj_type.
+      ls_key-obj_name = <ls_local>-item-obj_name.
+      READ TABLE lt_keys WITH TABLE KEY obj_type = ls_key-obj_type
+                                        obj_name = ls_key-obj_name
+           TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        APPEND <ls_local> TO lt_local.
+      ENDIF.
+    ENDLOOP.
+
+    " A deletion has to belong to the transport too, or the PR removes unrelated files
+    LOOP AT cs_files-remote ASSIGNING <ls_remote>.
+      CLEAR ls_item.
+
+      TRY.
+          zcl_abapgit_filename_logic=>file_to_object(
+            EXPORTING
+              iv_filename = <ls_remote>-filename
+              iv_path     = <ls_remote>-path
+              io_dot      = mi_repo->get_dot_abapgit( )
+            IMPORTING
+              es_item     = ls_item ).
+        CATCH zcx_abapgit_exception.
+          CONTINUE.
+      ENDTRY.
+
+      ls_key-obj_type = to_upper( ls_item-obj_type ).
+      ls_key-obj_name = to_upper( ls_item-obj_name ).
+      READ TABLE lt_keys WITH TABLE KEY obj_type = ls_key-obj_type
+                                        obj_name = ls_key-obj_name
+           TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        APPEND <ls_remote> TO lt_remote.
+      ENDIF.
+    ENDLOOP.
+
+    cs_files-local  = lt_local.
+    cs_files-remote = lt_remote.
 
   ENDMETHOD.
 
