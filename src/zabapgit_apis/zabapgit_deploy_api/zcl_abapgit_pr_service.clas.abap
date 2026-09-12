@@ -6,15 +6,15 @@ CLASS zcl_abapgit_pr_service DEFINITION
   PUBLIC SECTION.
 
     TYPES:
-      BEGIN OF ty_object,
+      BEGIN OF ty_file,
         obj_type TYPE trobjtype,
         obj_name TYPE sobj_name,
         path     TYPE string,
         filename TYPE string,
         method   TYPE zif_abapgit_definitions=>ty_method,
-      END OF ty_object .
+      END OF ty_file .
     TYPES:
-      ty_objects_tt TYPE STANDARD TABLE OF ty_object WITH DEFAULT KEY .
+      ty_files_tt TYPE STANDARD TABLE OF ty_file WITH DEFAULT KEY .
 
     TYPES:
       BEGIN OF ty_request,
@@ -44,7 +44,8 @@ CLASS zcl_abapgit_pr_service DEFINITION
         source_branch  TYPE string,
         target_branch  TYPE string,
         object_count   TYPE i,
-        objects        TYPE ty_objects_tt,
+        file_count     TYPE i,
+        files          TYPE ty_files_tt,
         reviewers      TYPE string_table,
       END OF ty_preview .
 
@@ -57,6 +58,7 @@ CLASS zcl_abapgit_pr_service DEFINITION
         pr_number     TYPE i,
         pr_url        TYPE string,
         object_count  TYPE i,
+        file_count    TYPE i,
         reviewers     TYPE string_table,
         log_handle    TYPE balloghndl,
         message       TYPE string,
@@ -148,11 +150,17 @@ CLASS zcl_abapgit_pr_service DEFINITION
       RAISING
         zcx_abapgit_exception .
 
-    METHODS map_objects
+    METHODS map_files
       IMPORTING
-        !is_files         TYPE zif_abapgit_definitions=>ty_stage_files
+        !is_files       TYPE zif_abapgit_definitions=>ty_stage_files
       RETURNING
-        VALUE(rt_objects) TYPE ty_objects_tt .
+        VALUE(rt_files) TYPE ty_files_tt .
+
+    METHODS count_objects
+      IMPORTING
+        !it_files       TYPE ty_files_tt
+      RETURNING
+        VALUE(rv_count) TYPE i .
 
     METHODS build_stage
       IMPORTING
@@ -277,8 +285,9 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
     rs_preview-parent_request = get_parent_request( is_request-transport ).
     rs_preview-owner          = get_request_owner( is_request-transport ).
     rs_preview-transport_text = get_transport_description( is_request-transport ).
-    rs_preview-objects        = map_objects( ls_files ).
-    rs_preview-object_count   = lines( rs_preview-objects ).
+    rs_preview-files          = map_files( ls_files ).
+    rs_preview-file_count     = lines( rs_preview-files ).
+    rs_preview-object_count   = count_objects( rs_preview-files ).
 
     IF rs_preview-parent_request <> is_request-transport.
       rs_preview-task_request = is_request-transport.
@@ -323,10 +332,11 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
     rs_result-source_branch = ls_preview-source_branch.
     rs_result-target_branch = ls_preview-target_branch.
     rs_result-object_count  = ls_preview-object_count.
+    rs_result-file_count    = ls_preview-file_count.
     rs_result-reviewers     = ls_preview-reviewers.
     rs_result-log_handle    = mv_log_handle.
 
-    IF ls_preview-object_count = 0.
+    IF ls_preview-file_count = 0.
       rs_result-success = abap_false.
       rs_result-message = |Nothing to stage for transport { is_request-transport }|.
       write_log( iv_type    = 'W'
@@ -340,8 +350,9 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
 
     IF is_request-dry_run = abap_true.
       rs_result-success = abap_true.
-      rs_result-message = |Dry run: { ls_preview-object_count } object(s) would be pushed to | &&
-                          |{ ls_preview-source_branch } and a PR raised against { ls_preview-target_branch }|.
+      rs_result-message = |Dry run: { ls_preview-object_count } object(s) in { ls_preview-file_count } file(s) | &&
+                          |would be pushed to { ls_preview-source_branch } and a PR raised against | &&
+                          |{ ls_preview-target_branch }|.
       RETURN.
     ENDIF.
 
@@ -375,7 +386,7 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
 
         write_log( iv_type    = 'S'
                    iv_message = 'Commit pushed'
-                   iv_detail  = |{ ls_preview-object_count } object(s)| ).
+                   iv_detail  = |{ ls_preview-object_count } object(s), { ls_preview-file_count } file(s)| ).
 
         " Switch back so the next change starts from the release branch again
         mi_repo_online->select_branch( ls_preview-target_branch ).
@@ -543,27 +554,51 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD map_objects.
+  METHOD map_files.
 
     FIELD-SYMBOLS <ls_local>  LIKE LINE OF is_files-local.
     FIELD-SYMBOLS <ls_remote> LIKE LINE OF is_files-remote.
-    FIELD-SYMBOLS <ls_object> LIKE LINE OF rt_objects.
+    FIELD-SYMBOLS <ls_file>   LIKE LINE OF rt_files.
 
     LOOP AT is_files-local ASSIGNING <ls_local>.
-      APPEND INITIAL LINE TO rt_objects ASSIGNING <ls_object>.
-      <ls_object>-obj_type = <ls_local>-item-obj_type.
-      <ls_object>-obj_name = <ls_local>-item-obj_name.
-      <ls_object>-path     = <ls_local>-file-path.
-      <ls_object>-filename = <ls_local>-file-filename.
-      <ls_object>-method   = zif_abapgit_definitions=>c_method-add.
+      APPEND INITIAL LINE TO rt_files ASSIGNING <ls_file>.
+      <ls_file>-obj_type = <ls_local>-item-obj_type.
+      <ls_file>-obj_name = <ls_local>-item-obj_name.
+      <ls_file>-path     = <ls_local>-file-path.
+      <ls_file>-filename = <ls_local>-file-filename.
+      <ls_file>-method   = zif_abapgit_definitions=>c_method-add.
     ENDLOOP.
 
     LOOP AT is_files-remote ASSIGNING <ls_remote>.
-      APPEND INITIAL LINE TO rt_objects ASSIGNING <ls_object>.
-      <ls_object>-path     = <ls_remote>-path.
-      <ls_object>-filename = <ls_remote>-filename.
-      <ls_object>-method   = zif_abapgit_definitions=>c_method-rm.
+      APPEND INITIAL LINE TO rt_files ASSIGNING <ls_file>.
+      <ls_file>-path     = <ls_remote>-path.
+      <ls_file>-filename = <ls_remote>-filename.
+      <ls_file>-method   = zif_abapgit_definitions=>c_method-rm.
     ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD count_objects.
+
+    TYPES: BEGIN OF lty_key,
+             obj_type TYPE trobjtype,
+             obj_name TYPE sobj_name,
+           END OF lty_key.
+
+    DATA lt_keys TYPE HASHED TABLE OF lty_key WITH UNIQUE KEY obj_type obj_name.
+    DATA ls_key  TYPE lty_key.
+
+    FIELD-SYMBOLS <ls_file> LIKE LINE OF it_files.
+
+    " Deleted remote files carry no item, so they cannot be counted as objects
+    LOOP AT it_files ASSIGNING <ls_file> WHERE obj_name IS NOT INITIAL.
+      ls_key-obj_type = <ls_file>-obj_type.
+      ls_key-obj_name = <ls_file>-obj_name.
+      INSERT ls_key INTO TABLE lt_keys.
+    ENDLOOP.
+
+    rv_count = lines( lt_keys ).
 
   ENDMETHOD.
 
