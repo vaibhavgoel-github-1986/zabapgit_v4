@@ -543,14 +543,11 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
         ENDIF.
 
       WHEN 'S' OR 'X' OR 'R' OR 'Q'.
-        " Sub-task: the task keeps its own E071 entries after release, so only the
-        " objects owned by this developer are staged.
+        " Sub-task: E071 entries exist from the moment an object is touched, so an open
+        " task can be staged repeatedly while review comments are worked through. The
+        " task is released only once its pull request has been approved and merged.
         IF ls_request-strkorr IS INITIAL.
           zcx_abapgit_exception=>raise( |Task { lv_trkorr } has no parent request| ).
-        ENDIF.
-        IF ls_request-trstatus <> 'R' AND ls_request-trstatus <> 'N'.
-          zcx_abapgit_exception=>raise( |Task { lv_trkorr } is not released. | &&
-                                        |Release the task first, then stage it| ).
         ENDIF.
 
       WHEN OTHERS.
@@ -1041,3 +1038,4 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
 
     ENDMETHOD.
 ENDCLASS.
+

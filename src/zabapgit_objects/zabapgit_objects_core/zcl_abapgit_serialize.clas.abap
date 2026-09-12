@@ -67,10 +67,17 @@ CLASS zcl_abapgit_serialize DEFINITION
     METHODS add_data
       IMPORTING
         !ii_data_config TYPE REF TO zif_abapgit_data_config
+        !it_filter      TYPE zif_abapgit_definitions=>ty_tadir_tt OPTIONAL
       CHANGING
         !ct_files       TYPE zif_abapgit_definitions=>ty_files_item_tt
       RAISING
         zcx_abapgit_exception .
+    METHODS is_in_filter
+      IMPORTING
+        !is_item      TYPE zif_abapgit_definitions=>ty_item
+        !it_filter    TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING
+        VALUE(rv_yes) TYPE abap_bool .
     METHODS add_dot_abapgit
       CHANGING
         !ct_files TYPE zif_abapgit_definitions=>ty_files_item_tt
@@ -162,6 +169,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
     DATA lt_files TYPE zif_abapgit_git_definitions=>ty_files_tt.
     DATA ls_file LIKE LINE OF lt_files.
+    DATA ls_item TYPE zif_abapgit_definitions=>ty_item.
 
     FIELD-SYMBOLS <ls_return> LIKE LINE OF ct_files.
 
@@ -171,35 +179,73 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
     lt_files = ii_data_config->to_json( ).
     LOOP AT lt_files INTO ls_file.
-      APPEND INITIAL LINE TO ct_files ASSIGNING <ls_return>.
-      <ls_return>-file = ls_file.
 
       " Derive object from config filename (namespace + escaping)
+      CLEAR ls_item.
       zcl_abapgit_filename_logic=>file_to_object(
         EXPORTING
-          iv_filename = <ls_return>-file-filename
-          iv_path     = <ls_return>-file-path
+          iv_filename = ls_file-filename
+          iv_path     = ls_file-path
           io_dot      = mo_dot_abapgit
         IMPORTING
-          es_item     = <ls_return>-item ).
+          es_item     = ls_item ).
 
-      <ls_return>-item-obj_type = zif_abapgit_data_config=>c_data_type-tabu. " todo
+      ls_item-obj_type = zif_abapgit_data_config=>c_data_type-tabu. " todo
+
+      IF is_in_filter( is_item   = ls_item
+                       it_filter = it_filter ) = abap_false.
+        CONTINUE.
+      ENDIF.
+
+      APPEND INITIAL LINE TO ct_files ASSIGNING <ls_return>.
+      <ls_return>-file = ls_file.
+      <ls_return>-item = ls_item.
     ENDLOOP.
 
     lt_files = zcl_abapgit_data_factory=>get_serializer( )->serialize( ii_data_config ).
     LOOP AT lt_files INTO ls_file.
-      APPEND INITIAL LINE TO ct_files ASSIGNING <ls_return>.
-      <ls_return>-file = ls_file.
 
       " Derive object from data filename (namespace + escaping)
+      CLEAR ls_item.
       zcl_abapgit_filename_logic=>file_to_object(
         EXPORTING
-          iv_filename = <ls_return>-file-filename
-          iv_path     = <ls_return>-file-path
+          iv_filename = ls_file-filename
+          iv_path     = ls_file-path
           io_dot      = mo_dot_abapgit
         IMPORTING
-          es_item     = <ls_return>-item ).
+          es_item     = ls_item ).
+
+      IF is_in_filter( is_item   = ls_item
+                       it_filter = it_filter ) = abap_false.
+        CONTINUE.
+      ENDIF.
+
+      APPEND INITIAL LINE TO ct_files ASSIGNING <ls_return>.
+      <ls_return>-file = ls_file.
+      <ls_return>-item = ls_item.
     ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD is_in_filter.
+
+    DATA lv_obj_type TYPE tadir-object.
+    DATA lv_obj_name TYPE tadir-obj_name.
+
+    " Unfiltered serialization must keep returning every data file
+    IF it_filter IS INITIAL.
+      rv_yes = abap_true.
+      RETURN.
+    ENDIF.
+
+    lv_obj_type = to_upper( is_item-obj_type ).
+    lv_obj_name = to_upper( is_item-obj_name ).
+
+    READ TABLE it_filter TRANSPORTING NO FIELDS
+      WITH KEY object   = lv_obj_type
+               obj_name = lv_obj_name.
+    rv_yes = xsdbool( sy-subrc = 0 ).
 
   ENDMETHOD.
 
@@ -389,6 +435,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
     add_data(
       EXPORTING
         ii_data_config = ii_data_config
+        it_filter      = it_filter
       CHANGING
         ct_files       = rt_files ).
 
@@ -765,3 +812,4 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
   ENDMETHOD.
 ENDCLASS.
+
