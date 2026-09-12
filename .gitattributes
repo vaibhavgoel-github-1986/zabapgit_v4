@@ -1,0 +1,23 @@
+# abapGit requires LF. CRLF anywhere in a serialized file produces a permanent
+# local-vs-remote diff that pulling can never resolve.
+* text=auto eol=lf
+
+*.abap   text eol=lf
+*.xml    text eol=lf
+*.asddls text eol=lf
+*.asbdef text eol=lf
+*.asdef  text eol=lf
+*.asbnd  text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+
+# Binary payloads served by abapGit (MIME objects). Never apply EOL conversion
+# to these or the object is corrupted on push.
+*.w3mi.data.* binary
+*.w3ht.data.* binary
+*.woff        binary
+*.woff2       binary
+*.png         binary
+*.jpg         binary
+*.gif         binary
+*.ico         binary

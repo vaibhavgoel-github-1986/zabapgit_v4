@@ -1,0 +1,22 @@
+root = true
+
+# SAP strips trailing blanks when it stores ABAP source, so any trailing
+# whitespace committed here becomes a diff that pulling can never clear.
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+[*.abap]
+indent_style = space
+indent_size = 2
+
+[*.{xml,asddls,asbdef,asdef,asbnd}]
+indent_style = space
+indent_size = 1
+
+# Binary MIME payloads must not be touched
+[*.{woff,woff2,png,jpg,gif,ico}]
+trim_trailing_whitespace = false
+insert_final_newline = false
