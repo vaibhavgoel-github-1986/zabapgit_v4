@@ -1015,3 +1015,4 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+

@@ -1,0 +1,4 @@
+@EndUserText.label: 'Stage a transport and raise a GitHub pull request'
+define service ZSD_GIT_PR {
+  expose ZCE_GIT_PR as GitPr;
+}

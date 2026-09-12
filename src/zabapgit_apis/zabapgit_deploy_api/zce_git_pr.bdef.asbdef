@@ -1,0 +1,13 @@
+unmanaged implementation in class zbp_ce_git_pr unique;
+
+define behavior for ZCE_GIT_PR alias GitPr
+{
+  create;
+
+  field ( readonly ) request_id, success, pr_number, pr_url, source_branch,
+                     resolved_target, repo_url, parent_request, task_request,
+                     owner, transport_text, object_count, file_count,
+                     reviewers, files, message;
+
+  field ( mandatory : create ) transport;
+}
