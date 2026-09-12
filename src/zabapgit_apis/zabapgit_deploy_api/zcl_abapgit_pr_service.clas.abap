@@ -27,6 +27,7 @@ CLASS zcl_abapgit_pr_service DEFINITION
         pr_body        TYPE string,
         reviewers      TYPE string_table,
         git_user       TYPE string,
+        " Caller's own GitHub token. Never stored, never logged.
         git_token      TYPE string,
         dry_run        TYPE abap_bool,
       END OF ty_request .
@@ -47,6 +48,10 @@ CLASS zcl_abapgit_pr_service DEFINITION
         file_count     TYPE i,
         files          TYPE ty_files_tt,
         reviewers      TYPE string_table,
+        " Set when a previous run already pushed this transport
+        branch_exists  TYPE abap_bool,
+        open_pr_number TYPE int8,
+        open_pr_status TYPE zde_pr_status,
       END OF ty_preview .
 
     TYPES:
@@ -57,6 +62,8 @@ CLASS zcl_abapgit_pr_service DEFINITION
         target_branch TYPE string,
         pr_number     TYPE i,
         pr_url        TYPE string,
+        " X when an already open pull request was pushed to instead of raising a new one
+        pr_reused     TYPE abap_bool,
         object_count  TYPE i,
         file_count    TYPE i,
         reviewers     TYPE string_table,
@@ -66,7 +73,6 @@ CLASS zcl_abapgit_pr_service DEFINITION
 
     " Values that are hardcoded inside ZCL_ABAPGIT_GUI_PAGE_COMMIT
     CONSTANTS c_tvarvc_reviewers TYPE rvari_vnam VALUE 'Z_CODE_REVIEWERS' ##NO_TEXT.
-    CONSTANTS c_tvarvc_api_key TYPE rvari_vnam VALUE 'ZGIT_API_KEY' ##NO_TEXT.
     CONSTANTS c_default_reviewer TYPE string VALUE 'sekanaga_cisco' ##NO_TEXT.
     CONSTANTS c_github_user_suffix TYPE string VALUE '_cisco' ##NO_TEXT.
     CONSTANTS c_branch_prefix TYPE string VALUE 'feature/' ##NO_TEXT.
@@ -176,6 +182,31 @@ CLASS zcl_abapgit_pr_service DEFINITION
       RAISING
         zcx_abapgit_exception .
 
+    METHODS remote_branch_exists
+      IMPORTING
+        !iv_branch       TYPE string
+      RETURNING
+        VALUE(rv_exists) TYPE abap_bool
+      RAISING
+        zcx_abapgit_exception .
+
+    METHODS find_open_pull_request
+      IMPORTING
+        !iv_parent_request TYPE strkorr
+        !iv_task_request   TYPE trkorr
+      EXPORTING
+        !ev_pr_number      TYPE int8
+        !ev_pr_status      TYPE zde_pr_status
+      RAISING
+        zcx_abapgit_exception .
+
+    METHODS link_pull_request
+      IMPORTING
+        !is_preview   TYPE ty_preview
+        !iv_pr_number TYPE i
+      RAISING
+        zcx_abapgit_exception .
+
     METHODS determine_reviewers
       IMPORTING
         !iv_owner           TYPE tr_as4user
@@ -276,6 +307,11 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
 
     assert_transport_usable( is_request-transport ).
 
+    " Branch resolution and status calculation both reach the remote, so authenticate first
+    mv_user_and_repo = resolve_user_and_repo( ).
+    setup_credentials( iv_user  = is_request-git_user
+                       iv_token = is_request-git_token ).
+
     ls_files = collect_stage_files( is_request-transport ).
 
     rs_preview-repo_key       = mi_repo->get_key( ).
@@ -307,6 +343,17 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
 
     rs_preview-reviewers = determine_reviewers( iv_owner    = rs_preview-owner
                                                 it_override = is_request-reviewers ).
+
+    " A previous run may already have pushed this transport
+    rs_preview-branch_exists = remote_branch_exists( rs_preview-source_branch ).
+
+    find_open_pull_request(
+      EXPORTING
+        iv_parent_request = rs_preview-parent_request
+        iv_task_request   = rs_preview-task_request
+      IMPORTING
+        ev_pr_number      = rs_preview-open_pr_number
+        ev_pr_status      = rs_preview-open_pr_status ).
 
   ENDMETHOD.
 
@@ -350,25 +397,35 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
 
     IF is_request-dry_run = abap_true.
       rs_result-success = abap_true.
-      rs_result-message = |Dry run: { ls_preview-object_count } object(s) in { ls_preview-file_count } file(s) | &&
-                          |would be pushed to { ls_preview-source_branch } and a PR raised against | &&
-                          |{ ls_preview-target_branch }|.
+      IF ls_preview-open_pr_number IS INITIAL.
+        rs_result-message = |Dry run: { ls_preview-object_count } object(s) in { ls_preview-file_count } file(s) | &&
+                            |would be pushed to { ls_preview-source_branch } and a PR raised against | &&
+                            |{ ls_preview-target_branch }|.
+      ELSE.
+        rs_result-pr_number = ls_preview-open_pr_number.
+        rs_result-pr_reused = abap_true.
+        rs_result-message = |Dry run: { ls_preview-object_count } object(s) in { ls_preview-file_count } file(s) | &&
+                            |would be pushed to { ls_preview-source_branch }, updating open PR | &&
+                            |{ ls_preview-open_pr_number } ({ ls_preview-open_pr_status })|.
+      ENDIF.
       RETURN.
     ENDIF.
 
-    mv_user_and_repo = resolve_user_and_repo( ).
-    setup_credentials( iv_user  = is_request-git_user
-                       iv_token = is_request-git_token ).
-
+    " preview( ) has already resolved the repository and set up credentials
     TRY.
         ls_files = collect_stage_files( is_request-transport ).
         lo_stage = build_stage( ls_files ).
 
-        write_log( iv_message = 'Creating feature branch'
-                   iv_detail  = ls_preview-source_branch ).
-
-        " create_branch also switches the repository onto the new branch
-        mi_repo_online->create_branch( ls_preview-source_branch ).
+        IF ls_preview-branch_exists = abap_true.
+          write_log( iv_message = 'Reusing existing feature branch'
+                     iv_detail  = ls_preview-source_branch ).
+          mi_repo_online->select_branch( ls_preview-source_branch ).
+        ELSE.
+          write_log( iv_message = 'Creating feature branch'
+                     iv_detail  = ls_preview-source_branch ).
+          " create_branch also switches the repository onto the new branch
+          mi_repo_online->create_branch( ls_preview-source_branch ).
+        ENDIF.
 
         ls_committer = determine_committer( ).
 
@@ -401,6 +458,21 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
     lv_source_plain = zcl_abapgit_git_branch_utils=>get_display_name( ls_preview-source_branch ).
     lv_target_plain = zcl_abapgit_git_branch_utils=>get_display_name( ls_preview-target_branch ).
 
+    " An open pull request already tracks this branch, so the commit above is enough
+    IF ls_preview-open_pr_number IS NOT INITIAL.
+      rs_result-pr_number = ls_preview-open_pr_number.
+      rs_result-pr_url    = |https://github.com/{ mv_user_and_repo }/pull/{ ls_preview-open_pr_number }|.
+      rs_result-pr_reused = abap_true.
+      rs_result-success   = abap_true.
+      rs_result-message   = |Pushed { ls_preview-object_count } object(s) to existing PR | &&
+                            |{ ls_preview-open_pr_number } ({ ls_preview-open_pr_status }) on { lv_source_plain }|.
+
+      write_log( iv_type    = 'S'
+                 iv_message = |Pushed to existing pull request { ls_preview-open_pr_number }|
+                 iv_detail  = rs_result-pr_url ).
+      RETURN.
+    ENDIF.
+
     lv_title = escape_json_string( is_request-pr_title ).
     IF lv_title IS INITIAL.
       lv_title = escape_json_string( is_request-commit_message ).
@@ -428,13 +500,8 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
                iv_message = |Pull request { rs_result-pr_number } created|
                iv_detail  = rs_result-pr_url ).
 
-    zcl_abapgit_pr_status_manager=>create_pr_link(
-      iv_parent_request = ls_preview-parent_request
-      iv_task_request   = ls_preview-task_request
-      iv_pr_id          = CONV int8( rs_result-pr_number )
-      iv_pr_status      = zcl_abapgit_pr_status_manager=>c_pr_status-open
-      iv_owner          = ls_preview-owner
-      iv_log_handle     = mv_log_handle ).
+    link_pull_request( is_preview   = ls_preview
+                       iv_pr_number = rs_result-pr_number ).
 
     IF ls_preview-reviewers IS NOT INITIAL.
       lo_provider->assign_reviewers( iv_pull_number = rs_result-pr_number
@@ -655,6 +722,101 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD remote_branch_exists.
+
+    DATA lt_branches TYPE zif_abapgit_git_definitions=>ty_git_branch_list_tt.
+    DATA lv_plain    TYPE string.
+
+    FIELD-SYMBOLS <ls_branch> LIKE LINE OF lt_branches.
+
+    lv_plain = zcl_abapgit_git_branch_utils=>get_display_name( iv_branch ).
+
+    lt_branches = zcl_abapgit_git_factory=>get_git_transport(
+      )->branches( mi_repo_online->get_url( )
+      )->get_branches_only( ).
+
+    LOOP AT lt_branches ASSIGNING <ls_branch>.
+      IF <ls_branch>-display_name = lv_plain.
+        rv_exists = abap_true.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD find_open_pull_request.
+
+    DATA lt_links TYPE zcl_abapgit_pr_status_manager=>tt_pr_links.
+
+    FIELD-SYMBOLS <ls_link> LIKE LINE OF lt_links.
+
+    CLEAR: ev_pr_number, ev_pr_status.
+
+    IF iv_parent_request IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " GitHub owns the truth, the table only caches it. Reconcile before trusting a row,
+    " otherwise a PR merged outside SAP still looks reusable here.
+    zcl_abapgit_pr_status_manager=>sync_with_github(
+      iv_parent_request = iv_parent_request
+      iv_task_request   = iv_task_request
+      iv_repo_url       = mi_repo_online->get_url( )
+      iv_log_handle     = mv_log_handle ).
+
+    lt_links = zcl_abapgit_pr_status_manager=>get_pr_tr_linkage(
+                 iv_parent_request = iv_parent_request
+                 iv_task_request   = iv_task_request ).
+
+    " An empty task selects every PR under the parent, so match the task exactly
+    " to avoid adopting a sibling task's pull request. Merged or closed ones need a new PR.
+    LOOP AT lt_links ASSIGNING <ls_link>
+      WHERE task_request = iv_task_request
+        AND pr_status <> zcl_abapgit_pr_status_manager=>c_pr_status-merged
+        AND pr_status <> zcl_abapgit_pr_status_manager=>c_pr_status-closed.
+      ev_pr_number = <ls_link>-pr_id.
+      ev_pr_status = <ls_link>-pr_status.
+      RETURN.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD link_pull_request.
+
+    DATA lt_links TYPE zcl_abapgit_pr_status_manager=>tt_pr_links.
+
+    FIELD-SYMBOLS <ls_link> LIKE LINE OF lt_links.
+
+    " ZDT_PULL_REQUEST is keyed on parent and task only, so one task can hold one link.
+    " A finished PR has to give up its slot before the follow-up PR can take it.
+    lt_links = zcl_abapgit_pr_status_manager=>get_pr_tr_linkage(
+                 iv_parent_request = is_preview-parent_request
+                 iv_task_request   = is_preview-task_request ).
+
+    LOOP AT lt_links ASSIGNING <ls_link> WHERE task_request = is_preview-task_request.
+      zcl_abapgit_pr_status_manager=>delete_pr_link(
+        iv_parent_request = <ls_link>-parent_request
+        iv_task_request   = <ls_link>-task_request
+        iv_pr_id          = <ls_link>-pr_id ).
+
+      write_log( iv_type    = 'W'
+                 iv_message = |PR link { <ls_link>-pr_id } replaced by { iv_pr_number }|
+                 iv_detail  = |Previous status { <ls_link>-pr_status }, history stays on GitHub| ).
+    ENDLOOP.
+
+    zcl_abapgit_pr_status_manager=>create_pr_link(
+      iv_parent_request = is_preview-parent_request
+      iv_task_request   = is_preview-task_request
+      iv_pr_id          = CONV int8( iv_pr_number )
+      iv_pr_status      = zcl_abapgit_pr_status_manager=>c_pr_status-open
+      iv_owner          = is_preview-owner
+      iv_log_handle     = mv_log_handle ).
+
+  ENDMETHOD.
+
+
   METHOD determine_reviewers.
 
     DATA lt_tvarvc TYPE STANDARD TABLE OF tvarvc WITH DEFAULT KEY.
@@ -806,38 +968,35 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
 
   METHOD setup_credentials.
 
-    DATA lv_token TYPE string.
-    DATA lv_user  TYPE string.
+    DATA lv_url  TYPE string.
+    DATA lv_user TYPE string.
 
-    lv_token = iv_token.
-    lv_user  = iv_user.
+    lv_url = mi_repo_online->get_url( ).
 
-    IF lv_token IS INITIAL.
-      SELECT SINGLE low FROM tvarvc
-        INTO @lv_token
-        WHERE name = @c_tvarvc_api_key
-          AND type = 'P'.
-      IF sy-subrc <> 0.
-        CLEAR lv_token.
+    " Each developer authenticates with their own token, so nothing is shared system wide.
+    " With no token supplied, fall back to what abapGit already stored for this user and repository.
+    IF iv_token IS INITIAL.
+      IF zcl_abapgit_login_manager=>load( lv_url ) IS INITIAL.
+        zcx_abapgit_exception=>raise(
+          |No GitHub token supplied and none stored for { lv_url }. | &&
+          |Pass your own token in GIT_TOKEN, or log on to the repository once in abapGit.| ).
       ENDIF.
-    ENDIF.
-
-    " Without a token abapGit falls back to whatever it already has stored
-    IF lv_token IS INITIAL.
       RETURN.
     ENDIF.
 
+    lv_user = iv_user.
     IF lv_user IS INITIAL.
       lv_user = 'x-access-token'.
     ENDIF.
 
-    zcl_abapgit_login_manager=>set( iv_uri      = mi_repo_online->get_url( )
+    zcl_abapgit_login_manager=>set( iv_uri      = lv_url
                                     iv_username = lv_user
-                                    iv_password = lv_token ).
+                                    iv_password = iv_token ).
 
+    " The PR provider authenticates against the REST API host, not the clone URL
     zcl_abapgit_login_manager=>set( iv_uri      = |https://api.github.com/repos/{ mv_user_and_repo }|
                                     iv_username = lv_user
-                                    iv_password = lv_token ).
+                                    iv_password = iv_token ).
 
   ENDMETHOD.
 

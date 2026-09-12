@@ -61,8 +61,11 @@ All of it lives in TVARVC. Nothing works without these.
 | Variable | Type | Purpose |
 | --- | --- | --- |
 | `ZGIT_REPO_URL` | Parameter | Repository URL used by the BAdI when syncing PR status |
-| `ZGIT_API_KEY` | Parameter (`P`) | GitHub personal access token |
+| `ZGIT_API_KEY` | Parameter (`P`) | GitHub token used by the BAdI and the commit GUI page |
 | `Z_CODE_REVIEWERS` | Select-option (multi-row) | GitHub usernames to request review from |
+
+> `ZCL_ABAPGIT_PR_SERVICE` deliberately does **not** use `ZGIT_API_KEY`. Each developer passes their
+> own token, so no shared credential is needed. See *Headless API* below.
 
 Also required:
 
@@ -101,8 +104,13 @@ WRITE ls_result-pr_url.
 - `preview( )` writes nothing — use it to confirm the object list before acting
 - `ls_request-dry_run = abap_true` goes one step further and resolves everything without touching
   GitHub
-- Token precedence: `ls_request-git_token` → TVARVC `ZGIT_API_KEY` → whatever abapGit already stored.
-  Credentials are set for both the repo URL and `api.github.com` so no password popup can fire
+- **Authentication is per developer.** `ls_request-git_token` is used if supplied; otherwise the
+  service falls back to the credential abapGit already stored for *this SAP user and this repository*.
+  If neither exists it fails with a clear message rather than a bare 401. No shared token is read,
+  and the token is never written to the application log.
+  This matters because repositories live under different GitHub orgs and need different tokens.
+- Credentials are established before any remote call, since branch resolution and status calculation
+  both reach GitHub
 - Refuses released transports up front, and refuses non-GitHub repository URLs
 - Every step is written to application log `ZABAPGIT` / `COMMIT`
 
