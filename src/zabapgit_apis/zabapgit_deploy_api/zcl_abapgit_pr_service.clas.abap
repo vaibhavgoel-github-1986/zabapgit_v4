@@ -214,13 +214,6 @@ CLASS zcl_abapgit_pr_service DEFINITION
       RAISING
         zcx_abapgit_exception .
 
-    METHODS link_pull_request
-      IMPORTING
-        !is_preview   TYPE ty_preview
-        !iv_pr_number TYPE i
-      RAISING
-        zcx_abapgit_exception .
-
     METHODS determine_reviewers
       IMPORTING
         !iv_owner           TYPE tr_as4user
@@ -516,8 +509,13 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
                iv_message = |Pull request { rs_result-pr_number } created|
                iv_detail  = rs_result-pr_url ).
 
-    link_pull_request( is_preview   = ls_preview
-                       iv_pr_number = rs_result-pr_number ).
+    zcl_abapgit_pr_status_manager=>create_pr_link(
+      iv_parent_request = ls_preview-parent_request
+      iv_task_request   = ls_preview-task_request
+      iv_pr_id          = CONV int8( rs_result-pr_number )
+      iv_pr_status      = zcl_abapgit_pr_status_manager=>c_pr_status-open
+      iv_owner          = ls_preview-owner
+      iv_log_handle     = mv_log_handle ).
 
     IF ls_preview-reviewers IS NOT INITIAL.
       lo_provider->assign_reviewers( iv_pull_number = rs_result-pr_number
@@ -898,40 +896,6 @@ CLASS zcl_abapgit_pr_service IMPLEMENTATION.
       ev_pr_status = <ls_link>-pr_status.
       RETURN.
     ENDLOOP.
-
-  ENDMETHOD.
-
-
-  METHOD link_pull_request.
-
-    DATA lt_links TYPE zcl_abapgit_pr_status_manager=>tt_pr_links.
-
-    FIELD-SYMBOLS <ls_link> LIKE LINE OF lt_links.
-
-    " ZDT_PULL_REQUEST is keyed on parent and task only, so one task can hold one link.
-    " A finished PR has to give up its slot before the follow-up PR can take it.
-    lt_links = zcl_abapgit_pr_status_manager=>get_pr_tr_linkage(
-                 iv_parent_request = is_preview-parent_request
-                 iv_task_request   = is_preview-task_request ).
-
-    LOOP AT lt_links ASSIGNING <ls_link> WHERE task_request = is_preview-task_request.
-      zcl_abapgit_pr_status_manager=>delete_pr_link(
-        iv_parent_request = <ls_link>-parent_request
-        iv_task_request   = <ls_link>-task_request
-        iv_pr_id          = <ls_link>-pr_id ).
-
-      write_log( iv_type    = 'W'
-                 iv_message = |PR link { <ls_link>-pr_id } replaced by { iv_pr_number }|
-                 iv_detail  = |Previous status { <ls_link>-pr_status }, history stays on GitHub| ).
-    ENDLOOP.
-
-    zcl_abapgit_pr_status_manager=>create_pr_link(
-      iv_parent_request = is_preview-parent_request
-      iv_task_request   = is_preview-task_request
-      iv_pr_id          = CONV int8( iv_pr_number )
-      iv_pr_status      = zcl_abapgit_pr_status_manager=>c_pr_status-open
-      iv_owner          = is_preview-owner
-      iv_log_handle     = mv_log_handle ).
 
   ENDMETHOD.
 

@@ -108,19 +108,21 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
                          THEN iv_task_request
                          ELSE iv_parent_request ).
 
-    " Check if link already exists
+    " A task holds one row per pull request, so only the same PR counts as a duplicate
     SELECT SINGLE parent_request FROM zdt_pull_request
       INTO @DATA(lv_existing)
       WHERE parent_request = @iv_parent_request
-        AND task_request   = @iv_task_request.
+        AND task_request   = @iv_task_request
+        AND pr_id          = @iv_pr_id.
     IF sy-subrc = 0.
       write_log( iv_log_handle = iv_log_handle
                  iv_type       = 'E'
                  iv_message    = 'PR link already exists'
-                 iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }| ).
+                 iv_detail     = |Parent: { iv_parent_request }, Task: { iv_task_request }, PR: { iv_pr_id }| ).
 
       zcx_abapgit_exception=>raise(
-        |PR link already exists for request { iv_parent_request } task { iv_task_request }| ).
+        |PR link already exists for request { iv_parent_request } task { iv_task_request } | &&
+        |and PR { iv_pr_id }| ).
     ENDIF.
 
     " Create new PR link
@@ -457,3 +459,4 @@ CLASS ZCL_ABAPGIT_PR_STATUS_MANAGER IMPLEMENTATION.
 
   ENDMETHOD.
 ENDCLASS.
+
